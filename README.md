@@ -65,14 +65,16 @@ cd mixsmith
 pip install -e .
 ```
 
-### 2. Configure Credentials
+### 2. Configure Credentials & OAuth (PKCE)
+
+Mixsmith supports standard Authorization Code Flow with **Proof Key for Code Exchange (PKCE, RFC 7636)** and cryptographic CSRF state validation:
 
 ```bash
 cp .env.example .env
-# Fill in SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET
+# Fill in SPOTIFY_CLIENT_ID and optional SPOTIFY_CLIENT_SECRET
 ```
 
-Log in via Spotify OAuth:
+Log in via Spotify OAuth with local callback server and PKCE verification:
 ```bash
 python -m mixsmith.cli auth login
 ```
@@ -132,13 +134,29 @@ Mixsmith includes a comprehensive pytest suite covering all algorithms, exports,
 python -m pytest tests -v
 ```
 
+### Enforcing Constraints & Force Override
+
+Mixsmith independently validates every playlist against all requested hard and soft constraints. If any hard constraint fails (e.g. impossible artist spacing or exceeding per-artist quotas), Mixsmith blocks playlist creation to protect curation integrity. You can force playlist creation with the `--force` flag:
+
+```bash
+python -m mixsmith.cli curate \
+  --playlist "your_playlist_id" \
+  --spacing 4 \
+  --force
+```
+
 ---
 
 ## Spotify API & Developer Policy Compliance
 
-- **No Unauthorized Ingestion**: Mixsmith never sends Spotify metadata or playlists to external LLM services for training or classification. Natural language prompts are translated into structured constraints locally.
-- **Standard Permitted Scopes**: Mixsmith requests only standard read and modify scopes (`playlist-modify-private`, `playlist-read-private`, `user-library-read`).
-- **Safe Mutation Protocol**: Requires explicit user confirmation or `--confirm` flag before any playlist creation, update, or deletion.
+Mixsmith is designed in strict compliance with the **Spotify Developer Terms of Service and Policy**:
+
+- **Decoupled Algorithmic Processing**: Mixsmith's categorization, sequencing, and curation algorithms run entirely locally. All genre inferences, era attributions, and thematic vibe classifications are computed via platform-independent heuristics, lexical tokenization, and ISRC registry codes—completely decoupled from Spotify streaming endpoints or proprietary recommendation models.
+- **No Unauthorized Ingestion or AI Training**: Mixsmith never transmits Spotify metadata, catalog details, or user playlists to external LLM services or third-party APIs for training, indexing, or profiling. Natural language curation queries are parsed locally into structured constraint schemas.
+- **Standard Permitted OAuth Scopes**: Mixsmith requests only standard, minimal user permissions (`playlist-modify-private`, `playlist-read-private`, `user-library-read`).
+- **Cryptographic Auth Security (RFC 7636 PKCE)**: Authorization employs SHA-256 code challenge generation and random cryptographic CSRF state validation against unauthorized interception.
+- **Safe Mutation Protocol**: Mutations are strictly opt-in. Mixsmith requires explicit interactive confirmation or the `--confirm` flag, inspects pre-mutation snapshots for external drift, validates Spotify URIs, and executes track modifications in atomic batches.
+- **No Stream Ripping or Audio Redistribution**: Mixsmith manages metadata and playlist track references only. It does not stream, cache, reverse-engineer, or store audio files.
 
 ---
 

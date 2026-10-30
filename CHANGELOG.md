@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] - 2026-10-31
+
+### Fixed
+- **De-clumper Correctness & Infeasibility Analysis (`core/declumper.py`)**:
+  - Fixed early return for playlists of two tracks: now explicitly verifies actual artist sets and flags spacing collisions.
+  - Corrected collaboration feasibility: eliminated false-positive infeasibility bug caused by flawed pairwise condition; now accounts for valid disjoint placements.
+  - Removed arbitrary collaboration-density thresholds as proof of infeasibility.
+  - Formalized feasibility statuses into `PROVEN_INFEASIBLE`, `SUFFICIENTLY_FEASIBLE`, and `CONDITIONALLY_CONSTRAINED`.
+  - Replaced fabricated maximum achievable spacing estimates with exact mathematical ceilings for proven bottlenecks and `None` for conditionally constrained sets.
+  - Handled empty artist metadata without artificial collisions.
+- **Independent Validation Semantics (`core/validation.py`)**:
+  - Formalized explicit hard (`track_preservation`, `artist_spacing`, `max_tracks_per_artist`, `pinned_positions`) and soft (`target_duration`, `genre_distribution`, `decade_distribution`) constraint tiers.
+  - Guaranteed that validation summaries never report `PASSED` when hard constraints fail (`is_valid = False` and `Validation FAILED`).
+  - Added full decade distribution validation against target limits.
+  - Enhanced artist spacing reporting to log every violation pair and the exact minimum artist gap observed.
+  - Reinforced track preservation to check source occurrence counts and safely handle missing track IDs.
+- **Duration Knapsack Millisecond Verification (`core/duration.py`)**:
+  - Tracked exact running milliseconds inside DP state to prevent discretisation rounding drift from exceeding the maximum acceptable runtime.
+  - Added strict post-selection verification loop guaranteeing runtime ceilings.
+  - Added artist diversity novelty bonus and candidate sub-knapsack evaluation for large libraries.
+  - Added input validation for `target_minutes > 0` and `tolerance_minutes >= 0`.
+- **Quota Allocation Shortfall Handling (`core/quotas.py`)**:
+  - Added validation for non-negative, finite quota weights.
+  - Added automatic shortfall tracking (`unfilled_slots`) and proportional reallocation when categories have insufficient candidate tracks.
+  - Prioritized scarce categories first for multi-genre tracks.
+  - Preserved repeated source track occurrences without artificial slot deduping.
+- **Natural Language Safety (`ai/parser.py`, `cli/main.py`)**:
+  - Raised explicit `FilterMatchError` when filters match 0 tracks instead of silently replacing them with the entire library.
+  - Decoupled tempo/energy progression from popularity sorting (never maps energy to "gems").
+  - Blocked playlist creation in CLI if hard constraints failed, unless `--force` override is supplied.
+- **Auth & CI Packaging**:
+  - Implemented RFC 7636 PKCE OAuth flow with SHA-256 code challenge and cryptographic CSRF state validation in `auth/manager.py`.
+  - Added module entry points `mixsmith/__main__.py` and `mixsmith/cli/__main__.py`.
+  - Updated `pyproject.toml` to modern `setuptools.build_meta`, SPDX license string, and ruff/mypy configurations.
+  - Expanded CI matrix with Ruff linting, Mypy static typing, wheel build verification, and package installation test.
+  - Added 25 regression and safety tests (bringing total automated suite to 80 tests).
+
+---
+
 ## [0.3.0] - 2026-10-31
 
 ### Added

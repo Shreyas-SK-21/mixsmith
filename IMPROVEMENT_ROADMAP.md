@@ -141,7 +141,8 @@ mixsmith/
 | **Phase 5** | Exporter Modernization (Excel & CSV) | Medium | Completed |
 | **Phase 6** | Natural Language Curation Layer (Deterministic execution) | High | Completed |
 | **Phase 7** | Central Validation & Curation Explainability (V0.3 Refinement) | High | Completed |
-| **Phase 8** | Confidence-Aware Metadata & Mutation Verification (V0.4 Roadmap) | Medium | Planned |
+| **Phase 8** | Confidence-Aware Metadata & Mutation Verification | Medium | Completed |
+| **Phase 9** | Critical Regression Fixes & Feasibility Rigor (V0.3.1) | Critical | Completed |
 
 ---
 

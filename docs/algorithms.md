@@ -15,15 +15,18 @@ Let $C(a)$ denote the number of tracks featuring artist $a$. To place $C(a)$ tra
 $$L_{\min}(a) = (C(a) - 1) \cdot (k + 1) + 1$$
 If $L_{\min}(a) > N$, exact spacing $k$ is mathematically impossible.
 
-Mixsmith classifies feasibility into four distinct states:
-1. **`FEASIBLE`**: Spacing is mathematically sound across all individual and collaboration sets.
-2. **`NECESSARILY_INFEASIBLE`**: An individual artist violates the pigeonhole lower bound.
-3. **`COLLABORATION_CONSTRAINED`**: Individual frequencies pass, but shared collaborative tracks create dense mutual exclusions.
-4. **`CONDITIONALLY_TIGHT`**: Feasible only under optimal boundary placement.
+Similarly, if two tracks share identical or overlapping artist sets $\mathcal{A}(T_1) \cap \mathcal{A}(T_2) \neq \emptyset$, they cannot occupy adjacent positions within distance $\le k$. However, arbitrary pairwise collaboration density thresholds cannot be used as an infeasibility test. For instance, in a 4-track playlist with spacing $k=2$:
+$$\pi = [\{A, B\}, \{C\}, \{D\}, \{A, B\}]$$
+The pair $\{A, B\}$ appears at indices $0$ and $3$ (gap of 2 tracks), which is fully feasible. A pairwise collision is only proven impossible when $(C(pair) - 1)(k + 1) + 1 > N$.
 
-Mixsmith computes the maximum achievable spacing $k^*(a)$ for each bottleneck artist:
+Mixsmith classifies feasibility into three rigorous mathematical states:
+1. **`PROVEN_INFEASIBLE`**: An individual artist or proven disjoint subset violates the necessary pigeonhole bound $L_{\min} > N$.
+2. **`SUFFICIENTLY_FEASIBLE`**: All individual frequencies satisfy $C(a) \le \lceil N / (k + 1) \rceil$ and collaboration overlaps are sufficiently sparse to guarantee an interference-free schedule.
+3. **`CONDITIONALLY_CONSTRAINED`**: Individual frequencies pass the necessary pigeonhole bound, but dense overlapping collaborations make global placement conditional on exact boundary conditions.
+
+For single-artist bottlenecks, Mixsmith computes the exact mathematical ceiling:
 $$k^*(a) = \left\lfloor \frac{N - 1}{C(a) - 1} \right\rfloor - 1$$
-And reports the feasibility ceiling $k^* = \min_{a} k^*(a)$ before execution.
+For conditionally constrained cases where no closed-form ceiling is proven, Mixsmith avoids fabricating arbitrary numbers and reports `max_achievable_spacing = None`.
 
 ### Scheduling Algorithm
 Mixsmith uses a **Max-Frequency Greedy Priority Queue with Cooldown History**:
@@ -40,12 +43,13 @@ Mixsmith uses a **Max-Frequency Greedy Priority Queue with Cooldown History**:
 ## 2. Playlist Duration Optimization (Discrete 0/1 Knapsack)
 
 Rather than naive greedy thresholding, Mixsmith optimizes playlist duration using a discrete **0/1 Knapsack Formulation**:
-- **Time Discretization**: Durations are scaled to discrete units $\Delta t = 5$ seconds. For a target duration $D$ and tolerance $\delta$, the target capacity is $W = D / \Delta t$.
+- **Millisecond-Tracked DP State**: Durations are scaled to discrete units $\Delta t = 5$ seconds for DP space bounds ($W = D / \Delta t$). However, because discrete rounding can accumulate millisecond drift, the DP state tracks exact running milliseconds:
+  $$\text{state}(w) = (\text{val}, \text{track\_indices}, \text{actual\_total\_ms})$$
+  Any transition yielding $\text{actual\_total\_ms} > \text{max\_acceptable\_ms}$ is discarded. A post-selection verification loop guarantees that the actual playlist runtime strictly satisfies the target ceiling.
 - **Multi-Objective Value Function**:
   $$\text{val}(T) = \text{pop}(T) \cdot \frac{1}{1 + 0.35 \cdot \text{prior\_count}(\text{artist}(T))}$$
   This rewards track quality while penalizing artist over-representation to preserve diversity.
-- **Dynamic Programming Table**: Bounded DP finds the subset of tracks that minimizes $| \sum \text{duration} - D |$ while maximizing the diversity-weighted value score.
-- **Large Dataset Scalability**: For libraries exceeding 300 tracks, Mixsmith switches to a diversity-aware approximation heuristic.
+- **Large Dataset Scalability**: For libraries exceeding 300 tracks, Mixsmith ranks candidates by an artist-diversity novelty score, retains the top diverse candidates, and performs bounded knapsack optimization across the pruned subset.
 
 ---
 
@@ -56,18 +60,26 @@ To eliminate rounding drift and guarantee exact integer allocations across genre
 2. Take the integer floor: $F_i = \lfloor E_i \rfloor$.
 3. Compute fractional remainders: $R_i = E_i - F_i$.
 4. Allocate residual slots $S = N - \sum F_i$ to categories with the largest remainders.
+5. **Shortfall Reallocation**: If a category has fewer available tracks than its allocated quota, the unfilled slots are automatically cataloged and proportionally redistributed to remaining categories without changing total playlist size.
 
 ---
 
 ## 4. Independent Central Validation Engine
 
 Mixsmith decouples generation from verification. Once a permutation $\pi$ is produced, an independent `PlaylistValidator` inspects the final playlist across every requested constraint:
-- **`track_preservation`**: Proves all tracks originate strictly from the source library.
-- **`artist_spacing`**: Scans every window $[i, i+k]$ and reports exact violations and minimum gap observed.
-- **`max_tracks_per_artist`**: Verifies no artist exceeds their quota.
-- **`target_duration`**: Verifies total duration falls within $[D - \delta, D + \delta]$.
-- **`genre_distribution`**: Verifies final shares against target percentages.
-- **`pinned_positions`**: Verifies pinned tracks occupy their exact indices.
+
+- **Hard Constraints (`severity="error"`)**:
+  - **`track_preservation`**: Proves all tracks originate strictly from the source library and verifies source occurrence counts.
+  - **`artist_spacing`**: Scans every window $[i, i+k]$, recording every conflict pair and calculating the exact minimum artist gap observed.
+  - **`max_tracks_per_artist`**: Verifies no artist exceeds their quota, checking all primary and featured credits.
+  - **`pinned_positions`**: Verifies pinned tracks occupy their exact indices.
+  *Any hard constraint violation sets `is_valid = False` and outputs `Validation FAILED`.*
+
+- **Soft Constraints (`severity="warning"`)**:
+  - **`target_duration`**: Verifies total duration falls within $[D - \delta, D + \delta]$.
+  - **`genre_distribution`**: Verifies final genre shares against target percentages.
+  - **`decade_distribution`**: Verifies final era shares against requested decade bounds.
+  *Soft constraint warnings yield `Validation PASSED WITH WARNINGS`, preserving the playlist while highlighting trade-offs.*
 
 A constraint is never marked satisfied merely because matching tracks were found; only post-curation satisfaction is certified.
 
