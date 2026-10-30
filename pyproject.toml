@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "mixsmith"
+version = "0.1.0"
+description = "A music playlist curator. Describe what you want, get the playlist."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "openpyxl>=3.1",
+]
+
+[project.scripts]
+mixsmith = "mixsmith.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
