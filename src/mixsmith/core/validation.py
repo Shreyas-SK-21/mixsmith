@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
 
 from mixsmith.core.models import ConstraintResult, Track
 from mixsmith.utils.logging import get_logger
@@ -20,7 +19,7 @@ logger = get_logger("mixsmith.validation")
 class ValidationReport:
     """Consolidated independent audit report of all constraints on a playlist."""
     is_valid: bool
-    results: List[ConstraintResult]
+    results: list[ConstraintResult]
     total_violations: int
     summary: str
 
@@ -34,15 +33,22 @@ class ValidationReport:
 
 
 class PlaylistValidator:
-    """Independently verifies a finished playlist against requested curation constraints."""
+    """
+    Independently verifies a finished playlist against requested curation constraints.
+    Enforces strict distinction between hard constraints (which fail validation upon violation)
+    and soft constraints (which record visible warnings without silent pass masquerading).
+    """
 
     @staticmethod
     def validate_artist_spacing(
-        tracks: List[Track],
+        tracks: list[Track],
         min_spacing: int,
         consider_all_artists: bool = True
     ) -> ConstraintResult:
-        """Verifies that no two tracks within distance min_spacing share an artist."""
+        """
+        Hard Constraint: Verifies that no two tracks within distance min_spacing share an artist.
+        Reports all violations and the actual minimum gap observed.
+        """
         if min_spacing <= 0 or len(tracks) <= 1:
             return ConstraintResult(
                 name="artist_spacing",
@@ -51,16 +57,17 @@ class PlaylistValidator:
                 severity="info"
             )
 
-        def get_artists(t: Track) -> Set[str]:
-            if consider_all_artists and t.artists:
-                return {a.lower().strip() for a in t.artists if a.strip()}
-            return {t.primary_artist.lower().strip()} if t.primary_artist else {"unknown"}
+        def get_artists(t: Track) -> set[str]:
+            raw_arts = t.artists if consider_all_artists and t.artists else ([t.primary_artist] if t.primary_artist else [])
+            return {a.lower().strip() for a in raw_arts if a and a.strip()}
 
         violations = []
         min_gap_observed = float("inf")
 
         for i in range(len(tracks)):
             artists_i = get_artists(tracks[i])
+            if not artists_i:
+                continue
             window_end = min(len(tracks), i + min_spacing + 1)
             for j in range(i + 1, window_end):
                 artists_j = get_artists(tracks[j])
@@ -68,7 +75,7 @@ class PlaylistValidator:
                 if overlap:
                     gap = j - i - 1
                     min_gap_observed = min(min_gap_observed, gap)
-                    violations.append((i, j, tracks[i].name, tracks[j].name, list(overlap), gap))
+                    violations.append((i, j, tracks[i].name, tracks[j].name, sorted(overlap), gap))
 
         if not violations:
             return ConstraintResult(
@@ -78,26 +85,32 @@ class PlaylistValidator:
                 severity="info"
             )
         else:
-            first_v = violations[0]
+            min_gap_str = str(min_gap_observed) if min_gap_observed != float("inf") else "0"
+            violation_details = "; ".join(
+                f"Track #{v[0] + 1} '{v[2]}' & #{v[1] + 1} '{v[3]}' (gap {v[5]}, artist {v[4]})"
+                for v in violations[:10]
+            )
             details = (
-                f"{len(violations)} spacing violation(s) detected (requested min spacing: {min_spacing}). "
-                f"Example: Track #{first_v[0] + 1} '{first_v[2]}' and Track #{first_v[1] + 1} '{first_v[3]}' "
-                f"share artist(s) {first_v[4]} with spacing of {first_v[5]} tracks."
+                f"{len(violations)} spacing violation(s) detected (requested min spacing: {min_spacing}, "
+                f"actual minimum gap: {min_gap_str}). Details: {violation_details}."
             )
             return ConstraintResult(
                 name="artist_spacing",
                 satisfied=False,
                 details=details,
-                severity="warning"
+                severity="error"  # Hard constraint violation
             )
 
     @staticmethod
     def validate_max_tracks_per_artist(
-        tracks: List[Track],
-        max_tracks: Optional[int],
-        consider_all_artists: bool = False
+        tracks: list[Track],
+        max_tracks: int | None,
+        consider_all_artists: bool = True
     ) -> ConstraintResult:
-        """Verifies no artist appears more than max_tracks times."""
+        """
+        Hard Constraint: Verifies no artist appears more than max_tracks times.
+        Consistent with spacing, checks both primary and featured/co-artists when consider_all_artists=True.
+        """
         if max_tracks is None or max_tracks <= 0:
             return ConstraintResult(
                 name="max_tracks_per_artist",
@@ -108,11 +121,10 @@ class PlaylistValidator:
 
         counts: Counter = Counter()
         for t in tracks:
-            if consider_all_artists and t.artists:
-                for a in set(t.artists):
-                    counts[a.strip()] += 1
-            else:
-                counts[t.primary_artist or "Unknown"] += 1
+            raw_arts = t.artists if consider_all_artists and t.artists else ([t.primary_artist] if t.primary_artist else [])
+            unique_arts = {a.strip() for a in raw_arts if a and a.strip()}
+            for a in unique_arts:
+                counts[a] += 1
 
         exceeded = [(artist, cnt) for artist, cnt in counts.items() if cnt > max_tracks]
 
@@ -132,16 +144,16 @@ class PlaylistValidator:
                 name="max_tracks_per_artist",
                 satisfied=False,
                 details=details,
-                severity="error"
+                severity="error"  # Hard constraint violation
             )
 
     @staticmethod
     def validate_target_duration(
-        tracks: List[Track],
-        target_minutes: Optional[int],
+        tracks: list[Track],
+        target_minutes: int | None,
         tolerance_minutes: int = 10
     ) -> ConstraintResult:
-        """Verifies total duration is within target +/- tolerance."""
+        """Soft Constraint: Verifies total duration is within target +/- tolerance."""
         if target_minutes is None:
             return ConstraintResult(
                 name="target_duration",
@@ -166,16 +178,16 @@ class PlaylistValidator:
             name="target_duration",
             satisfied=satisfied,
             details=details,
-            severity="info" if satisfied else "warning"
+            severity="info" if satisfied else "warning"  # Soft constraint
         )
 
     @staticmethod
     def validate_genre_distribution(
-        tracks: List[Track],
-        target_quotas: Optional[Dict[str, float]],
+        tracks: list[Track],
+        target_quotas: dict[str, float] | None,
         tolerance_pct: float = 8.0
     ) -> ConstraintResult:
-        """Verifies actual final genre distribution matches target quotas within tolerance."""
+        """Soft Constraint: Verifies actual final genre distribution matches target quotas within tolerance."""
         if not target_quotas or not tracks:
             return ConstraintResult(
                 name="genre_distribution",
@@ -185,18 +197,18 @@ class PlaylistValidator:
             )
 
         total = len(tracks)
-        actual_counts: Dict[str, int] = defaultdict(int)
+        actual_counts: dict[str, int] = defaultdict(int)
         for t in tracks:
-            actual_counts[t.primary_genre.lower()] += 1
+            actual_counts[t.primary_genre.lower().strip()] += 1
 
         total_ratio = sum(target_quotas.values())
         discrepancies = []
         details_list = []
 
         for genre, requested_weight in target_quotas.items():
-            expected_pct = (requested_weight / total_ratio) * 100.0
-            actual_cnt = actual_counts.get(genre.lower(), 0)
-            actual_pct = (actual_cnt / total) * 100.0
+            expected_pct = (requested_weight / total_ratio) * 100.0 if total_ratio > 0 else 0.0
+            actual_cnt = actual_counts.get(genre.lower().strip(), 0)
+            actual_pct = (actual_cnt / total) * 100.0 if total > 0 else 0.0
             delta = abs(actual_pct - expected_pct)
 
             details_list.append(f"{genre}: {actual_pct:.1f}% (target: {expected_pct:.1f}%)")
@@ -216,11 +228,59 @@ class PlaylistValidator:
         )
 
     @staticmethod
-    def validate_pinned_positions(
-        tracks: List[Track],
-        pinned_positions: Optional[Dict[int, str]]
+    def validate_decade_distribution(
+        tracks: list[Track],
+        target_quotas: dict[str, float] | None,
+        tolerance_pct: float = 8.0
     ) -> ConstraintResult:
-        """Verifies pinned tracks occupy their exact requested positions."""
+        """Soft Constraint: Verifies actual final decade distribution matches target quotas within tolerance."""
+        if not target_quotas or not tracks:
+            return ConstraintResult(
+                name="decade_distribution",
+                satisfied=True,
+                details="No decade quotas specified.",
+                severity="info"
+            )
+
+        total = len(tracks)
+        actual_counts: dict[str, int] = defaultdict(int)
+        for t in tracks:
+            dec = (t.decade or "").strip().lower()
+            if dec:
+                actual_counts[dec] += 1
+
+        total_ratio = sum(target_quotas.values())
+        discrepancies = []
+        details_list = []
+
+        for decade, requested_weight in target_quotas.items():
+            expected_pct = (requested_weight / total_ratio) * 100.0 if total_ratio > 0 else 0.0
+            actual_cnt = actual_counts.get(decade.lower().strip(), 0)
+            actual_pct = (actual_cnt / total) * 100.0 if total > 0 else 0.0
+            delta = abs(actual_pct - expected_pct)
+
+            details_list.append(f"{decade}: {actual_pct:.1f}% (target: {expected_pct:.1f}%)")
+            if delta > tolerance_pct:
+                discrepancies.append((decade, actual_pct, expected_pct, delta))
+
+        satisfied = len(discrepancies) == 0
+        details = (
+            f"Decade shares: {', '.join(details_list)}."
+            + (f" Deviations exceeding +/-{tolerance_pct}%: {', '.join(d[0] for d in discrepancies)}." if discrepancies else "")
+        )
+        return ConstraintResult(
+            name="decade_distribution",
+            satisfied=satisfied,
+            details=details,
+            severity="info" if satisfied else "warning"
+        )
+
+    @staticmethod
+    def validate_pinned_positions(
+        tracks: list[Track],
+        pinned_positions: dict[int, str] | None
+    ) -> ConstraintResult:
+        """Hard Constraint: Verifies pinned tracks occupy their exact requested positions."""
         if not pinned_positions:
             return ConstraintResult(
                 name="pinned_positions",
@@ -239,9 +299,9 @@ class PlaylistValidator:
             t = tracks[idx]
             ident_clean = ident.lower().strip()
             matches = (
-                t.id.lower() == ident_clean or
-                t.uri.lower() == ident_clean or
-                t.name.lower() == ident_clean
+                (t.id and t.id.lower() == ident_clean) or
+                (t.uri and t.uri.lower() == ident_clean) or
+                (t.name and t.name.lower() == ident_clean)
             )
             if not matches:
                 violations.append(f"Position {idx}: expected '{ident}', found '{t.name}' ({t.id})")
@@ -255,63 +315,99 @@ class PlaylistValidator:
             name="pinned_positions",
             satisfied=satisfied,
             details=details,
-            severity="info" if satisfied else "error"
+            severity="info" if satisfied else "error"  # Hard constraint
         )
 
     @staticmethod
     def validate_track_preservation(
-        original_pool: List[Track],
-        final_tracks: List[Track]
+        original_pool: list[Track],
+        final_tracks: list[Track]
     ) -> ConstraintResult:
-        """Ensures all tracks in final playlist strictly originate from the source pool."""
-        original_ids = {t.id for t in original_pool if t.id}
-        final_ids = [t.id for t in final_tracks if t.id]
+        """
+        Hard Constraint: Ensures all tracks in the final playlist strictly originate from
+        the source pool and that no track is duplicated beyond its authorized occurrences.
+        Handles missing track IDs by falling back to URI and track signature.
+        """
+        def track_key(t: Track) -> str:
+            if t.id and t.id.strip():
+                return f"id:{t.id.strip()}"
+            if t.uri and t.uri.strip():
+                return f"uri:{t.uri.strip()}"
+            art_str = "-".join(sorted(a.lower().strip() for a in t.artists)) if t.artists else (t.primary_artist.lower().strip() if t.primary_artist else "unknown")
+            return f"meta:{t.name.lower().strip()}:{art_str}"
 
-        foreign = [t_id for t_id in final_ids if t_id not in original_ids]
-        if not foreign:
-            return ConstraintResult(
-                name="track_preservation",
-                satisfied=True,
-                details=f"All {len(final_tracks)} tracks originate strictly from the authorized input library.",
-                severity="info"
-            )
-        else:
-            return ConstraintResult(
-                name="track_preservation",
-                satisfied=False,
-                details=f"{len(foreign)} unverified or foreign track ID(s) found in playlist: {foreign[:5]}",
-                severity="error"
-            )
+        original_counts: Counter[str] = Counter(track_key(t) for t in original_pool)
+        final_counts: Counter[str] = Counter(track_key(t) for t in final_tracks)
+
+        foreign_keys = [k for k in final_counts if k not in original_counts]
+        multiplied_keys = [k for k, cnt in final_counts.items() if k in original_counts and cnt > original_counts[k]]
+
+        violations = []
+        if foreign_keys:
+            violations.append(f"{len(foreign_keys)} foreign track(s) not found in original pool: {foreign_keys[:5]}")
+        if multiplied_keys:
+            violations.append(f"{len(multiplied_keys)} track(s) repeated beyond authorized count: {multiplied_keys[:5]}")
+
+        satisfied = len(violations) == 0
+        details = (
+            f"All {len(final_tracks)} track(s) originate strictly from authorized input pool with valid occurrence counts."
+            if satisfied else f"Track preservation violations: {'; '.join(violations)}."
+        )
+        return ConstraintResult(
+            name="track_preservation",
+            satisfied=satisfied,
+            details=details,
+            severity="info" if satisfied else "error"  # Hard constraint
+        )
 
     @classmethod
     def validate_playlist(
         cls,
-        original_tracks: List[Track],
-        final_tracks: List[Track],
+        original_tracks: list[Track],
+        final_tracks: list[Track],
         min_artist_spacing: int = 1,
-        max_tracks_per_artist: Optional[int] = None,
-        target_duration_minutes: Optional[int] = None,
+        max_tracks_per_artist: int | None = None,
+        target_duration_minutes: int | None = None,
         duration_tolerance_minutes: int = 10,
-        genre_distribution: Optional[Dict[str, float]] = None,
-        pinned_positions: Optional[Dict[int, str]] = None
+        genre_distribution: dict[str, float] | None = None,
+        decade_distribution: dict[str, float] | None = None,
+        pinned_positions: dict[int, str] | None = None,
+        consider_all_artists: bool = True
     ) -> ValidationReport:
-        """Executes full independent validation across all constraint dimensions."""
+        """
+        Executes full independent validation across all constraint dimensions.
+        Distinguishes Hard constraints from Soft constraints.
+        A validation warning is never reported as complete satisfaction.
+        """
         results = [
             cls.validate_track_preservation(original_tracks, final_tracks),
-            cls.validate_artist_spacing(final_tracks, min_artist_spacing),
-            cls.validate_max_tracks_per_artist(final_tracks, max_tracks_per_artist),
+            cls.validate_artist_spacing(final_tracks, min_artist_spacing, consider_all_artists=consider_all_artists),
+            cls.validate_max_tracks_per_artist(final_tracks, max_tracks_per_artist, consider_all_artists=consider_all_artists),
             cls.validate_target_duration(final_tracks, target_duration_minutes, duration_tolerance_minutes),
             cls.validate_genre_distribution(final_tracks, genre_distribution),
+            cls.validate_decade_distribution(final_tracks, decade_distribution),
             cls.validate_pinned_positions(final_tracks, pinned_positions)
         ]
 
         total_violations = sum(1 for r in results if not r.satisfied)
-        is_valid = not any(r.severity == "error" for r in results if not r.satisfied)
+        hard_violations = [r for r in results if not r.satisfied and r.severity == "error"]
+        soft_violations = [r for r in results if not r.satisfied and r.severity == "warning"]
 
-        summary = (
-            f"Validation PASSED ({len(results) - total_violations}/{len(results)} constraints fully met)"
-            if is_valid else f"Validation FAILED ({total_violations} constraint(s) unsatisfied)"
-        )
+        # Hard constraints dictate is_valid
+        is_valid = len(hard_violations) == 0
+
+        if not is_valid:
+            summary = (
+                f"Validation FAILED: {len(hard_violations)} hard constraint(s) unsatisfied "
+                f"({', '.join(r.name for r in hard_violations)})."
+            )
+        elif soft_violations:
+            summary = (
+                f"Validation PASSED WITH WARNINGS: All hard constraints satisfied, but {len(soft_violations)} "
+                f"soft constraint warning(s) detected: {', '.join(r.name for r in soft_violations)}."
+            )
+        else:
+            summary = f"Validation PASSED: All {len(results)} constraint(s) fully satisfied."
 
         return ValidationReport(
             is_valid=is_valid,

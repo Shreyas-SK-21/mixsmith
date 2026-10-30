@@ -1,6 +1,5 @@
 """Unit tests for the Independent Constraint Validation System."""
 
-import pytest
 from mixsmith.core.validation import PlaylistValidator
 
 
