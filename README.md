@@ -144,4 +144,4 @@ python -m pytest tests -v
 
 ## License
 
-See [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) for license considerations before selecting an open-source license.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
