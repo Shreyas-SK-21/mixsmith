@@ -1,338 +1,182 @@
-#!/usr/bin/env python3
-# /// script
-# dependencies = ["requests", "openpyxl"]
-# ///
-"""
-Spotify Playlist Manager CLI - Human-Centric Music Curation
-Filter, sort, and organize playlists using human terms:
-Artists, Genres, Themes & Vibes, Eras & Decades, Languages & Regions, Clean vs Explicit,
-and Smart Artist Spacing (De-clumper).
-"""
+"""Mixsmith CLI - Command-Line Interface for Music Curation."""
+
+from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
-from pathlib import Path
 
-# Fix Windows console UTF-8 encoding for emojis and international scripts
+# Safe UTF-8 encoding on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-# Add current directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
-from spotify_client import SpotifyClient, DEFAULT_CREDENTIALS_PATH
+from mixsmith.ai.parser import execute_natural_language_curation
+from mixsmith.auth.manager import OAuthManager
+from mixsmith.connectors.spotify import SpotifyConnector
+from mixsmith.core.dedup import deduplicate_tracks, find_duplicates
+from mixsmith.core.filters import filter_tracks
+from mixsmith.core.manager import (
+    compare_playlists,
+    save_playlist_snapshot,
+    split_by_decade,
+    split_by_genre,
+)
+from mixsmith.core.models import Playlist, Track
+from mixsmith.core.sequencing import ConstraintSequencingEngine, CurationConstraints
+from mixsmith.exporters.csv import export_tracks_to_csv
+from mixsmith.exporters.excel import export_tracks_to_excel
+from mixsmith.utils.config import AppConfig, get_default_config_dir
+from mixsmith.utils.logging import get_logger
 
+logger = get_logger("mixsmith.cli")
+
+
+def load_tracks_from_source(
+    connector: Optional[SpotifyConnector],
+    file_input: Optional[str],
+    playlist_input: Optional[str]
+) -> Tuple[List[Track], str]:
+    """Loads tracks from an Excel file, CSV file, or live Spotify playlist."""
+    if file_input:
+        path = Path(file_input).resolve()
+        if not path.exists():
+            print(f"[ERROR] Source file not found: {path}", file=sys.stderr)
+            sys.exit(1)
+
+        tracks: List[Track] = []
+        if path.suffix.lower() == ".csv":
+            with open(path, "r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    tracks.append(Track.from_dict(row))
+            return tracks, path.stem
+
+        elif path.suffix.lower() in (".xlsx", ".xls"):
+            import openpyxl
+            wb = openpyxl.load_workbook(path, data_only=True)
+            ws = wb["Tracks"] if "Tracks" in wb.sheetnames else wb.active
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                return [], path.stem
+            header = [str(c or "").strip() for c in rows[0]]
+            for r in rows[1:]:
+                row_dict = dict(zip(header, r))
+                tracks.append(Track.from_dict(row_dict))
+            return tracks, path.stem
+
+    if playlist_input:
+        conn = connector or SpotifyConnector()
+        playlist = conn.get_playlist(playlist_input)
+        return playlist.tracks, playlist.name
+
+    # Check default directory for any exported playlist
+    default_dir = Path.cwd()
+    csv_candidates = list(default_dir.glob("*.csv"))
+    if csv_candidates:
+        print(f"Loading tracks from found CSV: {csv_candidates[0].name}")
+        return load_tracks_from_source(connector, str(csv_candidates[0]), None)
+
+    print("[ERROR] Please specify a source via --from-excel, --input, or --playlist", file=sys.stderr)
+    sys.exit(1)
+
+
+# --- Command Handlers ---
 
 def handle_auth(args):
-    client = SpotifyClient()
+    config = AppConfig.load()
+    auth = OAuthManager(config)
 
     if args.auth_cmd == "status":
-        print(f"Credentials file: {client.credentials_path}")
-        if not client.is_authenticated():
-            print("Status: NOT AUTHENTICATED.")
-            print("\nRun 'spotify_cli.py auth setup' or set SPOTIFY_ACCESS_TOKEN.")
-            return
-
-        try:
-            me = client.get_me()
-            print(f"Status: AUTHENTICATED")
-            print(f"User: {me.get('display_name')} (ID: {me.get('id')})")
-            print(f"Email: {me.get('email', 'N/A')}")
-            print(f"Country: {me.get('country', 'N/A')}")
-            print(f"Profile URL: {me.get('external_urls', {}).get('spotify')}")
-        except Exception as e:
-            print(f"Status: ERROR verifying credentials - {e}")
+        print("\n=== Mixsmith Authentication Status ===")
+        print(f"Config File: {config.credentials_file}")
+        print(f"Client ID: {'Configured' if config.client_id else 'Missing'}")
+        print(f"Client Secret: {'Configured' if config.client_secret else 'Missing'}")
+        print(f"Access Token: {'Present' if config.access_token else 'Missing'}")
+        print(f"Refresh Token: {'Present' if config.refresh_token else 'Missing'}")
+        if config.access_token or config.refresh_token:
+            try:
+                conn = SpotifyConnector(config=config, auth_manager=auth)
+                me = conn.get_me()
+                print(f"[OK] Authenticated as: {me.get('display_name')} (ID: {me.get('id')})")
+            except Exception as e:
+                print(f"[WARNING] Token verification failed: {e}")
+        else:
+            print("[INFO] Not authenticated. Run 'mixsmith auth login' to authenticate.")
 
     elif args.auth_cmd == "setup":
-        print("=== Spotify Developer App Setup ===")
-        print("1. Go to https://developer.spotify.com/dashboard and log in.")
-        print("2. Click 'Create app'.")
-        print("3. In Redirect URIs, add: http://127.0.0.1:8888/callback")
-        print("4. Check 'Web API' and save.")
-        print("5. Go to App Settings and copy your Client ID and Client Secret.\n")
-
         client_id = input("Enter Spotify Client ID: ").strip()
         client_secret = input("Enter Spotify Client Secret: ").strip()
-        if not client_id or not client_secret:
-            print("Error: Client ID and Secret cannot be empty.", file=sys.stderr)
-            return
-
-        client.save_credentials({
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uri": "http://127.0.0.1:8888/callback"
-        })
-        print(f"Credentials saved to {client.credentials_path}.")
-        print("Starting interactive login...")
-        client.authorize_interactive()
+        config.client_id = client_id
+        config.client_secret = client_secret
+        config.save_tokens(access_token="", refresh_token="")
+        print("Credentials saved. Starting OAuth login flow...")
+        auth.authorize_interactive()
 
     elif args.auth_cmd == "login":
-        client.authorize_interactive()
+        auth.authorize_interactive()
 
     elif args.auth_cmd == "set-token":
-        token = args.token.strip()
-        if not token:
-            print("Error: Token cannot be empty.", file=sys.stderr)
-            return
-        client.save_credentials({"access_token": token})
-        print(f"Access token saved. Verifying...")
-        try:
-            me = client.get_me()
-            print(f"Successfully authenticated as {me.get('display_name')} ({me.get('id')})!")
-        except Exception as e:
-            print(f"Warning: Failed to verify token: {e}", file=sys.stderr)
+        config.save_tokens(access_token=args.token.strip())
+        print("[SUCCESS] Access token saved.")
 
 
 def handle_list_playlists(args):
-    client = SpotifyClient()
-    playlists = client.list_user_playlists(limit=args.limit)
-    print(f"\nFound {len(playlists)} playlists for your account:\n")
-    print(f"{'#':<4} {'Name':<35} {'Tracks':<8} {'Visibility':<10} {'Playlist ID / URL'}")
-    print("-" * 90)
+    conn = SpotifyConnector()
+    playlists = conn.list_playlists(limit=args.limit)
+    print(f"\nYour Spotify Playlists ({len(playlists)} found):")
+    print(f"{'#':<4} {'Name':<35} {'Tracks':<8} {'ID'}")
+    print("-" * 75)
     for idx, p in enumerate(playlists, 1):
-        visibility = "Public" if p["public"] else "Private"
-        name = (p["name"][:32] + "...") if len(p["name"]) > 35 else p["name"]
-        print(f"{idx:<4} {name:<35} {p['tracks_count']:<8} {visibility:<10} {p['id']}")
-    print("\nTip: Use 'export --playlist <ID>' to export any playlist to Excel.\n")
+        print(f"{idx:<4} {p['name'][:33]:<35} {p['total_tracks']:<8} {p['id']}")
 
 
 def handle_export(args):
-    client = SpotifyClient()
-    output_path = args.output
-    fmt = (args.format or ("csv" if output_path.lower().endswith(".csv") else "excel")).lower()
+    conn = SpotifyConnector()
+    playlist = conn.get_playlist(args.playlist)
+    out_format = args.format or ("csv" if str(args.output).endswith(".csv") else "excel")
 
-    if fmt == "csv" and not output_path.lower().endswith(".csv"):
-        output_path += ".csv"
-    elif fmt != "csv" and not output_path.lower().endswith(".xlsx"):
-        output_path += ".xlsx"
-
-    print(f"Fetching playlist '{args.playlist}' and enriching with genres, themes, and eras...")
-    playlist_data = client.get_playlist(args.playlist)
-    
-    if fmt == "csv":
-        saved_path = client.export_to_csv(playlist_data, output_path)
-        print(f"\n[SUCCESS] Successfully exported {len(playlist_data['tracks'])} songs to CSV (Exportify compatible)!")
+    if out_format == "csv":
+        out_path = export_tracks_to_csv(playlist.tracks, args.output)
     else:
-        saved_path = client.export_to_excel(playlist_data, output_path)
-        print(f"\n[SUCCESS] Successfully exported {len(playlist_data['tracks'])} songs to Excel workbook!")
-    print(f"File location: {saved_path}")
+        out_path = export_tracks_to_excel(playlist.tracks, args.output, playlist_name=playlist.name)
 
-
-def handle_export_all(args):
-    client = SpotifyClient()
-    out_dir = Path(args.output_dir).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fmt = (args.format or "excel").lower()
-    ext = ".csv" if fmt == "csv" else ".xlsx"
-
-    print(f"Fetching list of all playlists...")
-    playlists = client.list_user_playlists(limit=100)
-    print(f"Found {len(playlists)} playlists to export.")
-
-    if args.include_liked:
-        playlists.insert(0, {
-            "id": "liked",
-            "name": "Liked Songs",
-            "tracks_count": "All",
-            "public": False
-        })
-
-    def sanitize_filename(name: str) -> str:
-        s = re.sub(r'[\\/*?:"<>|]', "", name).strip()
-        return s or "playlist"
-
-    for idx, p in enumerate(playlists, 1):
-        safe_name = sanitize_filename(p["name"])
-        target_file = out_dir / f"{idx:02d}_{safe_name}{ext}"
-        print(f"\n[{idx}/{len(playlists)}] Exporting '{p['name']}'...")
-        try:
-            data = client.get_playlist(p["id"])
-            if fmt == "csv":
-                client.export_to_csv(data, target_file)
-            else:
-                client.export_to_excel(data, target_file)
-            print(f"  -> Saved {len(data['tracks'])} tracks to {target_file.name}")
-        except Exception as e:
-            print(f"  -> Warning: Failed to export '{p['name']}': {e}", file=sys.stderr)
-
-    print(f"\n[SUCCESS] All {len(playlists)} playlists backed up to directory: {out_dir}")
-
-
-def load_tracks_from_source(client: SpotifyClient, excel_input: Optional[str], playlist_input: Optional[str]):
-    """Helper to load tracks from either an Excel file, CSV file, or live Spotify playlist."""
-    default_csv = Path(r"C:\Users\shrey\.gemini\antigravity\scratch\sorted playlists\Liked_Songs.csv")
-    if not excel_input and not playlist_input and default_csv.exists():
-        excel_input = str(default_csv)
-
-    if excel_input:
-        input_path = Path(excel_input).resolve()
-        if input_path.suffix.lower() == ".csv":
-            import csv
-            tracks = []
-            with open(input_path, "r", encoding="utf-8-sig") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    uri = row.get("Track URI", "")
-                    track_id = row.get("Track ID") or (uri.split(":")[-1] if uri else "") or row.get("id", "")
-                    title = row.get("Track Name") or row.get("name", "")
-                    artists = row.get("Artist Name(s)") or row.get("artists", "")
-                    artist_list = [a.strip() for a in artists.split(",") if a.strip()]
-                    primary_artist = artist_list[0] if artist_list else "Unknown"
-                    genres = [g.strip() for g in (row.get("Genres") or row.get("All Genres") or row.get("genres_str") or "").split(",") if g.strip()]
-                    rel_date = row.get("Release Date") or row.get("release_date", "")
-                    isrc = row.get("ISRC", "")
-                    pop = int(row.get("Popularity Score") or row.get("Popularity") or 0)
-                    dur_ms = int(row.get("Duration (ms)") or row.get("duration_ms") or 0)
-                    minutes = dur_ms // 60000
-                    seconds = (dur_ms % 60000) // 1000
-                    dur_fmt = row.get("Duration") or f"{minutes}:{seconds:02d}"
-                    is_exp = str(row.get("Explicit", "")).lower() in ("true", "yes", "1") or row.get("Rating") == "Explicit"
-                    album_name = row.get("Album Name") or row.get("album", "")
-                    album_type = (row.get("Album Type") or row.get("album_type", "Album")).capitalize()
-
-                    p_genre = row.get("Primary Genre") or client.classify_primary_genre(genres)
-                    year, decade, era = client.detect_era_and_decade(rel_date)
-                    lang = row.get("Language / Region") or client.detect_language_and_region(isrc, genres, title, artists)
-                    theme = row.get("Theme / Vibe") or client.detect_theme(title, genres, p_genre, year, pop, dur_ms)
-                    pop_tier = row.get("Popularity Tier") or client.classify_popularity_tier(pop)
-                    len_cat = row.get("Length Category") or client.classify_length_category(dur_ms)
-
-                    tracks.append({
-                        "name": title,
-                        "artists": artists,
-                        "primary_artist": primary_artist,
-                        "artist_list": artist_list,
-                        "album": album_name,
-                        "album_type": album_type,
-                        "primary_genre": p_genre,
-                        "genres": genres,
-                        "genres_str": ", ".join(genres[:4]) if genres else p_genre,
-                        "theme": theme,
-                        "decade": decade,
-                        "era": era,
-                        "release_year": year,
-                        "release_date": rel_date,
-                        "language": lang,
-                        "popularity": pop,
-                        "popularity_tier": pop_tier,
-                        "duration_ms": dur_ms,
-                        "duration_formatted": dur_fmt,
-                        "length_category": len_cat,
-                        "explicit": "Explicit" if is_exp else "Clean",
-                        "is_clean": not is_exp,
-                        "is_explicit": is_exp,
-                        "url": row.get("Spotify URL") or f"https://open.spotify.com/track/{track_id}",
-                        "uri": uri or f"spotify:track:{track_id}",
-                        "id": track_id,
-                        "isrc": isrc,
-                        "added_at": row.get("Added At", ""),
-                        "added_by": row.get("Added By", "")
-                    })
-            return tracks, input_path.stem
-        else:
-            import openpyxl
-            wb = openpyxl.load_workbook(input_path, data_only=True)
-            ws = wb["Tracks"]
-            tracks = []
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                if not row or not row[1]:
-                    continue
-                tracks.append({
-                    "name": row[1],
-                    "artists": row[2],
-                    "primary_artist": (row[2] or "").split(",")[0].strip(),
-                    "album": row[3],
-                    "album_type": row[4] if len(row) > 4 else "Album",
-                    "primary_genre": row[5] if len(row) > 5 else "Pop",
-                    "theme": row[6] if len(row) > 6 else "Feel-Good",
-                    "decade": row[7] if len(row) > 7 else "Modern",
-                    "release_year": row[8] if len(row) > 8 else 2020,
-                    "language": row[9] if len(row) > 9 else "English",
-                    "popularity_tier": row[10] if len(row) > 10 else "Moderate",
-                    "duration_formatted": row[11] if len(row) > 11 else "3:30",
-                    "length_category": row[12] if len(row) > 12 else "Standard",
-                    "explicit": row[13] if len(row) > 13 else "Clean",
-                    "is_clean": row[13] == "Clean" if len(row) > 13 else True,
-                    "is_explicit": row[13] == "Explicit" if len(row) > 13 else False,
-                    "genres_str": row[14] if len(row) > 14 else "",
-                    "genres": [g.strip() for g in (row[14] or "").split(",") if g.strip()] if len(row) > 14 else [],
-                    "url": row[18] if len(row) > 18 else "",
-                    "uri": row[19] if len(row) > 19 else "",
-                    "id": row[20] if len(row) > 20 else "",
-                    "added_at": row[17] if len(row) > 17 else ""
-                })
-            return tracks, input_path.stem
-    elif playlist_input:
-        data = client.get_playlist(playlist_input)
-        return data["tracks"], data["name"]
-    else:
-        raise ValueError("Must specify either --input <excel_file> or --playlist <id>")
+    print(f"[SUCCESS] Exported {len(playlist.tracks)} tracks to: {out_path}")
 
 
 def handle_analyze(args):
-    client = SpotifyClient()
-    tracks, playlist_name = load_tracks_from_source(client, args.input, args.playlist)
+    tracks, name = load_tracks_from_source(None, args.input, args.playlist)
+    print(f"\n=== Musical DNA Analysis: {name} ===")
+    print(f"Total Tracks: {len(tracks)}")
+    total_sec = sum(t.duration_ms for t in tracks) // 1000
+    print(f"Total Runtime: {total_sec // 3600}h {(total_sec % 3600) // 60}m")
 
-    from collections import defaultdict
-    genre_counts = defaultdict(int)
-    theme_counts = defaultdict(int)
-    decade_counts = defaultdict(int)
-    lang_counts = defaultdict(int)
-    artist_counts = defaultdict(int)
-    clean_count = sum(1 for t in tracks if t.get("is_clean"))
-    explicit_count = sum(1 for t in tracks if t.get("is_explicit"))
+    def show_counts(title, counter, top_n=6):
+        print(f"\n-- {title} --")
+        for item, count in counter.most_common(top_n):
+            pct = (count / len(tracks)) * 100 if tracks else 0
+            bar = "#" * int(pct / 4)
+            print(f"  {item:<24} {count:>3} ({pct:>5.1f}%) {bar}")
 
-    for t in tracks:
-        genre_counts[t.get("primary_genre") or "Other"] += 1
-        theme_counts[t.get("theme") or "Other"] += 1
-        decade_counts[t.get("decade") or "Other"] += 1
-        lang_counts[t.get("language") or "Other"] += 1
-        for a in t.get("artist_list", [t.get("primary_artist", "Unknown")]):
-            artist_counts[a] += 1
-
-    print(f"\n{'='*70}")
-    print(f"🎵 Human Analysis: {playlist_name} ({len(tracks)} songs)")
-    print(f"{'='*70}")
-
-    print("\n🎧 Top Genres:")
-    for g, c in sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:6]:
-        pct = round((c / len(tracks)) * 100)
-        bar = "█" * (pct // 5)
-        print(f"  • {g:<22} {c:>3} songs ({pct:>2}%) {bar}")
-
-    print("\n🌟 Themes & Vibes:")
-    for th, c in sorted(theme_counts.items(), key=lambda x: x[1], reverse=True)[:6]:
-        pct = round((c / len(tracks)) * 100)
-        print(f"  • {th:<22} {c:>3} songs ({pct:>2}%)")
-
-    print("\n🕰️ Eras & Decades:")
-    for d, c in sorted(decade_counts.items(), key=lambda x: x[1], reverse=True):
-        print(f"  • {d:<15} {c:>3} songs")
-
-    print("\n🌍 Languages & Cultural Regions:")
-    for l, c in sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
-        print(f"  • {l:<22} {c:>3} songs")
-
-    print("\n🎤 Top Artists:")
-    for a, c in sorted(artist_counts.items(), key=lambda x: x[1], reverse=True)[:6]:
-        print(f"  • {a:<24} {c} songs")
-
-    print(f"\n🛡️ Content Advisory: {clean_count} Clean | {explicit_count} Explicit")
-    print(f"{'='*70}\n")
+    show_counts("Primary Genres", Counter(t.primary_genre for t in tracks))
+    show_counts("Eras & Decades", Counter(t.decade for t in tracks))
+    show_counts("Themes & Vibes", Counter(t.theme for t in tracks))
+    show_counts("Languages & Regions", Counter(t.language for t in tracks))
 
 
 def handle_filter(args):
-    client = SpotifyClient()
-    tracks, playlist_name = load_tracks_from_source(client, args.input, args.playlist)
+    tracks, name = load_tracks_from_source(None, args.input, args.playlist)
 
-    filtered = client.filter_and_sort_tracks(
-        tracks=tracks,
-        filter_expr=args.filter,
+    filtered = filter_tracks(
+        tracks,
         artist_filter=args.artist,
         genre_filter=args.genre,
         theme_filter=args.theme,
@@ -340,164 +184,220 @@ def handle_filter(args):
         language_filter=args.language,
         clean_only=args.clean,
         explicit_only=args.explicit,
-        sort_by=args.sort
+        filter_expr=args.filter
     )
 
-    print(f"\nFiltered down to {len(filtered)} out of {len(tracks)} songs.")
-    if args.artist: print(f"  • Artist match: {args.artist}")
-    if args.genre: print(f"  • Genre match: {args.genre}")
-    if args.theme: print(f"  • Theme match: {args.theme}")
-    if args.decade: print(f"  • Decade match: {args.decade}")
-    if args.language: print(f"  • Language match: {args.language}")
-    if args.clean: print("  • Rating: Clean only")
-    if args.explicit: print("  • Rating: Explicit only")
-    if args.sort: print(f"  • Sorted by: {args.sort}")
+    if args.sort:
+        engine = ConstraintSequencingEngine()
+        plan = engine.curate(filtered, CurationConstraints(sort_mode=args.sort))
+        filtered = plan.tracks
 
-    print(f"\n{'#':<4} {'Song Title':<28} {'Artist':<22} {'Genre':<18} {'Theme / Vibe':<20} {'Decade':<8}")
-    print("-" * 105)
+    print(f"\nFiltered Tracks: {len(filtered)} of {len(tracks)} matched criteria.")
+    print(f"{'#':<4} {'Track Name':<30} {'Artist':<22} {'Genre':<18} {'Decade'}")
+    print("-" * 80)
     for idx, t in enumerate(filtered[:args.limit], 1):
-        name = (t["name"][:25] + "...") if len(t["name"]) > 28 else t["name"]
-        artist = (t["artists"][:19] + "...") if len(t["artists"]) > 22 else t["artists"]
-        genre = (t.get("primary_genre") or "Pop")[:18]
-        theme = (t.get("theme") or "Feel-Good")[:20]
-        decade = t.get("decade") or "Modern"
-        print(f"{idx:<4} {name:<28} {artist:<22} {genre:<18} {theme:<20} {decade:<8}")
-
-    if len(filtered) > args.limit:
-        print(f"... and {len(filtered) - args.limit} more songs.")
+        print(f"{idx:<4} {t.name[:28]:<30} {t.primary_artist[:20]:<22} {t.primary_genre[:16]:<18} {t.decade}")
 
     if args.output:
-        playlist_data = {
-            "name": f"Filtered ({args.genre or args.theme or args.artist or 'Custom'})",
-            "description": f"Curated by Spotify Playlist Manager (Sort: {args.sort or 'Default'})",
-            "owner": "Spotify Playlist Manager",
-            "tracks": filtered
-        }
-        saved_path = client.export_to_excel(playlist_data, args.output)
-        print(f"\nSaved filtered results to Excel: {saved_path}")
+        if args.output.endswith(".csv"):
+            export_tracks_to_csv(filtered, args.output)
+        else:
+            export_tracks_to_excel(filtered, args.output, playlist_name=f"Filtered - {name}")
+        print(f"[SUCCESS] Saved filtered tracks to: {args.output}")
 
 
-def handle_create_playlist(args):
-    client = SpotifyClient()
-    tracks, playlist_name = load_tracks_from_source(client, args.from_excel, args.playlist)
+def handle_curate(args):
+    """Natural-language and constraint-based curation command."""
+    conn = SpotifyConnector() if not args.from_excel else None
+    tracks, source_name = load_tracks_from_source(conn, args.from_excel, args.playlist)
 
-    filtered = client.filter_and_sort_tracks(
-        tracks=tracks,
-        filter_expr=args.filter,
-        artist_filter=args.artist,
-        genre_filter=args.genre,
-        theme_filter=args.theme,
-        decade_filter=args.decade,
-        language_filter=args.language,
-        clean_only=args.clean,
-        explicit_only=args.explicit,
-        sort_by=args.sort
-    )
+    if args.prompt:
+        print(f"\nCurating with natural language instruction: '{args.prompt}'")
+        plan, spec = execute_natural_language_curation(tracks, args.prompt)
+    else:
+        constraints = CurationConstraints(
+            min_artist_spacing=args.spacing,
+            max_tracks_per_artist=args.max_per_artist,
+            target_duration_minutes=args.target_duration,
+            sort_mode=args.sort
+        )
+        engine = ConstraintSequencingEngine()
+        plan = engine.curate(tracks, constraints, playlist_name=args.name or f"Curated {source_name}")
 
-    if not filtered:
-        print("No songs matched the filter criteria! Playlist creation cancelled.")
+    print(f"\n=== Curation Plan Preview: '{plan.playlist_name}' ===")
+    print(f"Source Tracks: {plan.initial_track_count} -> Selected: {plan.final_track_count}")
+    print("Constraints Evaluated:")
+    for c in plan.constraints_evaluated:
+        status_tag = "[PASS]" if c.satisfied else f"[{c.severity.upper()}]"
+        print(f"  {status_tag} {c.name}: {c.details}")
+
+    print("\nTrack Sequencing Preview (first 10 tracks):")
+    for idx, t in enumerate(plan.tracks[:10], 1):
+        print(f"  {idx:>2}. {t.name:<30} — {t.artist_display:<25} ({t.primary_genre})")
+
+    if args.dry_run:
+        print("\n[DRY RUN] No modifications were made to Spotify.")
         return
 
-    track_uris = [t["uri"] for t in filtered if t.get("uri")]
-    if not track_uris:
-        track_uris = [f"spotify:track:{t['id']}" for t in filtered if t.get("id")]
+    # Check for confirmation
+    if not args.confirm:
+        resp = input(f"\nCreate Spotify playlist '{plan.playlist_name}' with {len(plan.tracks)} tracks? [y/N]: ").strip().lower()
+        if resp not in ("y", "yes"):
+            print("Operation cancelled by user.")
+            return
 
-    print(f"\nPreparing to create new Spotify playlist '{args.name}' with {len(track_uris)} songs.")
-    if args.artist: print(f"  • Artist: {args.artist}")
-    if args.genre: print(f"  • Genre: {args.genre}")
-    if args.theme: print(f"  • Theme: {args.theme}")
-    if args.decade: print(f"  • Decade: {args.decade}")
-    if args.language: print(f"  • Language: {args.language}")
-    if args.sort: print(f"  • Sort: {args.sort}")
-
-    desc = args.description or f"Curated playlist: {args.genre or args.theme or 'Filtered songs'} (Sorted by: {args.sort or 'Natural'})"
-    res = client.create_playlist(
-        name=args.name,
-        description=desc,
+    # Execute playlist creation on Spotify
+    conn = SpotifyConnector()
+    created = conn.create_playlist(
+        name=args.name or plan.playlist_name,
+        description=f"Curated by Mixsmith ({plan.final_track_count} tracks)",
         public=args.public,
-        track_uris=track_uris
+        tracks=plan.tracks
     )
+    print(f"\n[SUCCESS] Playlist created on Spotify!")
+    print(f"URL: {created.url}")
 
-    print("\n[SUCCESS] New Spotify playlist created!")
-    print(f"Name: {res['name']}")
-    print(f"Total Songs: {res['total_tracks']}")
-    print(f"Spotify URL: {res['url']}")
+
+def handle_dedup(args):
+    """Deduplication command with version intelligence."""
+    tracks, name = load_tracks_from_source(None, args.input, args.playlist)
+    groups = find_duplicates(tracks)
+
+    print(f"\n=== Deduplication Analysis: {name} ===")
+    print(f"Identified {len(groups)} duplicate clusters across {len(tracks)} tracks.")
+
+    for idx, g in enumerate(groups[:8], 1):
+        print(f"\nCluster #{idx} [{g.category.upper()}]: '{g.canonical_track.name}' by {g.canonical_track.primary_artist}")
+        print(f"  Canonical: {g.canonical_track.name} (Album: {g.canonical_track.album})")
+        for v in g.variants:
+            print(f"  Variant  : {v.name} (Album: {v.album})")
+
+    if args.dry_run:
+        print("\n[DRY RUN] Run without --dry-run to apply deduplication.")
+        return
+
+    deduped, _ = deduplicate_tracks(tracks, strategy=args.strategy)
+    print(f"\nDeduplicated playlist: {len(tracks)} -> {len(deduped)} tracks (Strategy: {args.strategy}).")
+
+    if args.output:
+        if args.output.endswith(".csv"):
+            export_tracks_to_csv(deduped, args.output)
+        else:
+            export_tracks_to_excel(deduped, args.output, playlist_name=f"Deduped {name}")
+        print(f"[SUCCESS] Saved deduplicated collection to: {args.output}")
+
+
+def handle_compare(args):
+    """Compare two playlists."""
+    t1, name1 = load_tracks_from_source(None, args.input_1, args.playlist_1)
+    t2, name2 = load_tracks_from_source(None, args.input_2, args.playlist_2)
+
+    p1 = Playlist(id="p1", name=name1, tracks=t1)
+    p2 = Playlist(id="p2", name=name2, tracks=t2)
+
+    diff = compare_playlists(p1, p2)
+    print(f"\n=== Playlist Overlap Analysis ===")
+    print(f"Playlist A: {name1} ({len(t1)} tracks)")
+    print(f"Playlist B: {name2} ({len(t2)} tracks)")
+    print(f"Common Tracks: {diff['common_count']}")
+    print(f"Unique to A  : {diff['unique_to_p1_count']}")
+    print(f"Unique to B  : {diff['unique_to_p2_count']}")
+    print(f"Jaccard Similarity: {diff['jaccard_similarity']}%")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Spotify Playlist Manager - Human-centric music filtering, smart sorting, Excel export, and playlist generation"
+        prog="mixsmith",
+        description="Mixsmith: Production-Grade Music Curation and Sequencing Engine"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Subcommand: auth
     p_auth = subparsers.add_parser("auth", help="Manage Spotify API authentication")
     p_auth_sub = p_auth.add_subparsers(dest="auth_cmd", required=True)
-    p_auth_sub.add_parser("status", help="Check current authentication status and user details")
-    p_auth_sub.add_parser("setup", help="Configure Spotify Client ID & Secret and start login")
-    p_auth_sub.add_parser("login", help="Open browser to log in via Spotify OAuth")
-    p_set_token = p_auth_sub.add_parser("set-token", help="Directly set an OAuth access token")
+    p_auth_sub.add_parser("status", help="Check current authentication status")
+    p_auth_sub.add_parser("setup", help="Configure Client ID/Secret and authenticate")
+    p_auth_sub.add_parser("login", help="Log in via Spotify OAuth in browser")
+    p_set_token = p_auth_sub.add_parser("set-token", help="Directly set OAuth token")
     p_set_token.add_argument("token", help="Spotify Bearer token")
 
     # Subcommand: list-playlists
     p_list = subparsers.add_parser("list-playlists", help="List user's Spotify playlists")
-    p_list.add_argument("--limit", type=int, default=50, help="Max playlists to retrieve (default: 50)")
+    p_list.add_argument("--limit", type=int, default=50, help="Max playlists to retrieve")
 
     # Subcommand: export
-    p_export = subparsers.add_parser("export", help="Scrape playlist and export to formatted Excel or CSV (Exportify compatible)")
-    p_export.add_argument("--playlist", required=True, help="Playlist ID, URI, 'liked', or open.spotify.com URL")
-    p_export.add_argument("--output", default="spotify_playlist.xlsx", help="Destination file path (.xlsx or .csv)")
-    p_export.add_argument("--format", choices=["excel", "csv"], help="Export format: 'excel' (.xlsx) or 'csv' (Exportify compatible)")
-
-    # Subcommand: export-all (Bulk Exportify)
-    p_export_all = subparsers.add_parser("export-all", help="Bulk export all user playlists and Liked Songs into a folder")
-    p_export_all.add_argument("--output-dir", default="spotify_backups", help="Target directory for all exported playlists")
-    p_export_all.add_argument("--format", choices=["excel", "csv"], default="excel", help="File format: 'excel' (.xlsx) or 'csv'")
-    p_export_all.add_argument("--include-liked", action="store_true", default=True, help="Include Liked Songs library in export (default: True)")
-    p_export_all.add_argument("--no-liked", action="store_false", dest="include_liked", help="Skip Liked Songs library")
+    p_export = subparsers.add_parser("export", help="Export playlist to Excel or CSV")
+    p_export.add_argument("--playlist", required=True, help="Playlist ID, URL, or 'liked'")
+    p_export.add_argument("--output", default="playlist.xlsx", help="Output file path (.xlsx or .csv)")
+    p_export.add_argument("--format", choices=["excel", "csv"], help="Export format")
 
     # Subcommand: analyze
-    p_analyze = subparsers.add_parser("analyze", help="Analyze genres, themes, decades, languages, and artists")
-    p_analyze.add_argument("--input", help="Path to previously exported Excel (.xlsx) file")
-    p_analyze.add_argument("--playlist", help="Spotify Playlist ID, URI, or URL to analyze live")
+    p_analyze = subparsers.add_parser("analyze", help="Analyze genres, themes, and decades")
+    p_analyze.add_argument("--input", help="Source file (.xlsx or .csv)")
+    p_analyze.add_argument("--playlist", help="Spotify Playlist ID/URL")
 
     # Subcommand: filter
-    p_filter = subparsers.add_parser("filter", help="Filter and sort songs by human categories")
-    p_filter.add_argument("--input", help="Source Excel (.xlsx) file")
-    p_filter.add_argument("--playlist", help="Source Spotify Playlist ID/URL")
-    p_filter.add_argument("--artist", help="Filter by artist name(s), comma-separated e.g. 'Taylor Swift, Drake'")
-    p_filter.add_argument("--genre", help="Filter by genre e.g. 'Rock', 'Hip-Hop', 'Pop', 'K-Pop', 'R&B'")
-    p_filter.add_argument("--theme", help="Filter by theme e.g. 'workout', 'late-night', 'chill', 'party', 'road-trip', 'focus'")
-    p_filter.add_argument("--decade", help="Filter by decade e.g. '90s', '80s', '2000s', '2010s', '2020s'")
-    p_filter.add_argument("--language", help="Filter by language/region e.g. 'English', 'Spanish', 'Korean', 'Hindi'")
-    p_filter.add_argument("--clean", action="store_true", help="Include only clean (radio-friendly) tracks")
-    p_filter.add_argument("--explicit", action="store_true", help="Include only explicit tracks")
-    p_filter.add_argument("--filter", help="Custom human expression e.g. \"genre == 'rock' and decade == '90s'\"")
-    p_filter.add_argument("--sort", help="Smart sort: 'declump' (artist spacing), 'chronological', 'newest', 'genre', 'theme', 'decade', 'popularity', 'gems', 'artist', 'album'")
-    p_filter.add_argument("--limit", type=int, default=20, help="Max preview rows (default: 20)")
-    p_filter.add_argument("--output", help="Save filtered tracks to a new Excel file")
+    p_filter = subparsers.add_parser("filter", help="Filter and sort tracks")
+    p_filter.add_argument("--input", help="Source file (.xlsx or .csv)")
+    p_filter.add_argument("--playlist", help="Spotify Playlist ID/URL")
+    p_filter.add_argument("--artist", help="Filter by artist name(s)")
+    p_filter.add_argument("--genre", help="Filter by genre")
+    p_filter.add_argument("--theme", help="Filter by theme")
+    p_filter.add_argument("--decade", help="Filter by decade")
+    p_filter.add_argument("--language", help="Filter by language")
+    p_filter.add_argument("--clean", action="store_true", help="Clean tracks only")
+    p_filter.add_argument("--explicit", action="store_true", help="Explicit tracks only")
+    p_filter.add_argument("--filter", help="AST filter expression")
+    p_filter.add_argument("--sort", help="Sorting method (e.g. declump, chronological, decade, genre)")
+    p_filter.add_argument("--limit", type=int, default=20, help="Max preview rows")
+    p_filter.add_argument("--output", help="Save filtered tracks to file")
 
-    # Subcommand: create-playlist
-    p_create = subparsers.add_parser("create-playlist", help="Create a new Spotify playlist on command")
-    p_create.add_argument("--name", required=True, help="Name of the new Spotify playlist")
-    p_create.add_argument("--description", help="Description for the new playlist")
-    p_create.add_argument("--from-excel", help="Source tracks from an exported Excel file")
-    p_create.add_argument("--playlist", help="Source tracks live from an existing playlist ID/URL")
-    p_create.add_argument("--artist", help="Filter by artist name(s)")
+    # Subcommand: curate (Natural language & constraint sequencing)
+    p_curate = subparsers.add_parser("curate", help="Curate playlists using natural language or constraints")
+    p_curate.add_argument("--prompt", help="Natural language instruction (e.g. '2-hour late night drive with The Weeknd')")
+    p_curate.add_argument("--name", help="Name for the curated playlist")
+    p_curate.add_argument("--from-excel", help="Source tracks from file (.xlsx or .csv)")
+    p_curate.add_argument("--playlist", help="Source tracks live from Spotify playlist")
+    p_curate.add_argument("--spacing", type=int, default=1, help="Min artist spacing (default: 1)")
+    p_curate.add_argument("--max-per-artist", type=int, help="Max tracks allowed per artist")
+    p_curate.add_argument("--target-duration", type=int, help="Target duration in minutes")
+    p_curate.add_argument("--sort", help="Sequencing journey (declump, chronological, decade, genre, nostalgia)")
+    p_curate.add_argument("--dry-run", action="store_true", help="Preview plan without creating on Spotify")
+    p_curate.add_argument("--confirm", action="store_true", help="Auto-confirm Spotify creation")
+    p_curate.add_argument("--public", action="store_true", help="Make playlist public")
+
+    # Subcommand: dedup
+    p_dedup = subparsers.add_parser("dedup", help="Detect and resolve duplicates and version variants")
+    p_dedup.add_argument("--input", help="Source file (.xlsx or .csv)")
+    p_dedup.add_argument("--playlist", help="Spotify Playlist ID/URL")
+    p_dedup.add_argument("--strategy", choices=["exact_only", "keep_original", "keep_remaster", "keep_all"], default="exact_only")
+    p_dedup.add_argument("--dry-run", action="store_true", help="Preview duplicates without modifying")
+    p_dedup.add_argument("--output", help="Save deduplicated tracks to file")
+
+    # Subcommand: compare
+    p_comp = subparsers.add_parser("compare", help="Compare two playlists for overlap and differences")
+    p_comp.add_argument("--playlist-1", help="Spotify Playlist 1")
+    p_comp.add_argument("--input-1", help="File for Playlist 1")
+    p_comp.add_argument("--playlist-2", help="Spotify Playlist 2")
+    p_comp.add_argument("--input-2", help="File for Playlist 2")
+
+    # Backward compatibility: create-playlist
+    p_create = subparsers.add_parser("create-playlist", help="Create Spotify playlist (legacy alias for curate)")
+    p_create.add_argument("--name", required=True, help="Playlist name")
+    p_create.add_argument("--from-excel", help="Source tracks from file")
+    p_create.add_argument("--playlist", help="Source tracks from Spotify")
+    p_create.add_argument("--artist", help="Filter by artist")
     p_create.add_argument("--genre", help="Filter by genre")
     p_create.add_argument("--theme", help="Filter by theme")
     p_create.add_argument("--decade", help="Filter by decade")
-    p_create.add_argument("--language", help="Filter by language")
-    p_create.add_argument("--clean", action="store_true", help="Clean tracks only")
-    p_create.add_argument("--explicit", action="store_true", help="Explicit tracks only")
-    p_create.add_argument("--filter", help="Custom filter expression")
-    p_create.add_argument("--sort", help="Smart sort e.g. 'declump', 'chronological', 'genre', 'theme', 'popularity'")
-    p_create.add_argument("--public", action="store_true", help="Make playlist public (default: private)")
+    p_create.add_argument("--sort", help="Sort method")
+    p_create.add_argument("--public", action="store_true", help="Make public")
+    p_create.add_argument("--confirm", action="store_true", help="Confirm creation")
 
     # Subcommand: delete-playlist
-    p_delete = subparsers.add_parser("delete-playlist", help="Delete (unfollow) a Spotify playlist from your account")
-    p_delete.add_argument("--playlist", required=True, help="Playlist ID, URI, or URL to delete")
-    p_delete.add_argument("--confirm", action="store_true", help="Acknowledge confirmation to delete")
+    p_del = subparsers.add_parser("delete-playlist", help="Delete (unfollow) a Spotify playlist")
+    p_del.add_argument("--playlist", required=True, help="Playlist ID or URL")
+    p_del.add_argument("--confirm", action="store_true", help="Confirm deletion")
 
     args = parser.parse_args()
 
@@ -507,18 +407,33 @@ def main():
         handle_list_playlists(args)
     elif args.command == "export":
         handle_export(args)
-    elif args.command == "export-all":
-        handle_export_all(args)
     elif args.command == "analyze":
         handle_analyze(args)
     elif args.command == "filter":
         handle_filter(args)
+    elif args.command == "curate":
+        handle_curate(args)
+    elif args.command == "dedup":
+        handle_dedup(args)
+    elif args.command == "compare":
+        handle_compare(args)
     elif args.command == "create-playlist":
-        handle_create_playlist(args)
+        # Route to curate for consistent safe mutation handling
+        args.prompt = None
+        args.spacing = 1
+        args.max_per_artist = None
+        args.target_duration = None
+        args.dry_run = False
+        handle_curate(args)
     elif args.command == "delete-playlist":
-        client = SpotifyClient()
-        client.delete_playlist(args.playlist)
-        print(f"[SUCCESS] Playlist '{args.playlist}' has been deleted from your Spotify library.")
+        if not args.confirm:
+            ans = input(f"Are you sure you want to delete playlist {args.playlist}? [y/N]: ").strip().lower()
+            if ans not in ("y", "yes"):
+                print("Deletion cancelled.")
+                return
+        conn = SpotifyConnector()
+        conn.delete_playlist(args.playlist)
+        print(f"[SUCCESS] Unfollowed playlist {args.playlist}")
 
 
 if __name__ == "__main__":
