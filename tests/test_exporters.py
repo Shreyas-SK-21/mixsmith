@@ -2,9 +2,10 @@
 
 import csv
 from pathlib import Path
+
 import openpyxl
-import pytest
-from mixsmith.exporters.csv import export_tracks_to_csv, CSV_HEADERS
+
+from mixsmith.exporters.csv import CSV_HEADERS, export_tracks_to_csv
 from mixsmith.exporters.excel import export_tracks_to_excel
 
 

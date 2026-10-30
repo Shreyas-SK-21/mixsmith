@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import re
-import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any
 
 import requests
 
@@ -16,7 +14,6 @@ from mixsmith.connectors.base import MusicConnectorBase
 from mixsmith.core.exceptions import (
     APIError,
     AuthError,
-    PlaylistMutationError,
     RateLimitExceededError,
     ResourceNotFoundError,
     SnapshotDriftError,
@@ -25,8 +22,6 @@ from mixsmith.core.models import Playlist, Track
 from mixsmith.utils.config import AppConfig
 from mixsmith.utils.logging import get_logger
 from mixsmith.utils.metadata import (
-    classify_length_category,
-    classify_popularity_tier,
     classify_primary_genre,
     detect_era_and_decade,
     detect_language_and_region,
@@ -47,7 +42,7 @@ class PlaylistMutationResult:
     initial_track_count: int
     final_track_count: int
     tracks_added: int
-    invalid_uris: List[str] = field(default_factory=list)
+    invalid_uris: list[str] = field(default_factory=list)
     batches_executed: int = 0
     drift_detected: bool = False
     dry_run: bool = False
@@ -56,11 +51,11 @@ class PlaylistMutationResult:
 class SpotifyConnector(MusicConnectorBase):
     """Production-grade Spotify Web API Connector."""
 
-    def __init__(self, config: Optional[AppConfig] = None, auth_manager: Optional[OAuthManager] = None):
+    def __init__(self, config: AppConfig | None = None, auth_manager: OAuthManager | None = None):
         self.config = config or AppConfig.load()
         self.auth = auth_manager or OAuthManager(self.config)
 
-    def validate_and_normalize_track_uri(self, uri_or_id: str) -> Optional[str]:
+    def validate_and_normalize_track_uri(self, uri_or_id: str) -> str | None:
         """
         Validates and standardizes a track identifier into a spotify:track:URI.
         Returns None if identifier is malformed.
@@ -84,7 +79,7 @@ class SpotifyConnector(MusicConnectorBase):
 
         return None
 
-    def get_playlist_snapshot(self, identifier: str) -> Dict[str, Any]:
+    def get_playlist_snapshot(self, identifier: str) -> dict[str, Any]:
         """Fetches lightweight target playlist metadata for mutation safety checks."""
         p_id = self.extract_playlist_id(identifier)
         data = self.api_request("GET", f"playlists/{p_id}?fields=id,name,snapshot_id,tracks.total,owner.id")
@@ -99,15 +94,15 @@ class SpotifyConnector(MusicConnectorBase):
     def mutate_playlist_tracks(
         self,
         identifier: str,
-        track_uris: List[str],
-        expected_snapshot_id: Optional[str] = None,
+        track_uris: list[str],
+        expected_snapshot_id: str | None = None,
         dry_run: bool = False,
         replace: bool = False,
         strict_drift: bool = True
     ) -> PlaylistMutationResult:
         """
         Safely applies track mutations to an existing Spotify playlist.
-        
+
         Performs pre-mutation state inspection, external drift detection, URI validation,
         batched requests, and post-mutation state verification.
         """
@@ -133,8 +128,8 @@ class SpotifyConnector(MusicConnectorBase):
                 logger.warning(msg)
 
         # 2. URI Validation
-        valid_uris: List[str] = []
-        invalid_uris: List[str] = []
+        valid_uris: list[str] = []
+        invalid_uris: list[str] = []
         for raw_uri in track_uris:
             normalized = self.validate_and_normalize_track_uri(raw_uri)
             if normalized:
@@ -210,8 +205,8 @@ class SpotifyConnector(MusicConnectorBase):
         self,
         method: str,
         endpoint: str,
-        params: Optional[Dict] = None,
-        json_data: Optional[Dict] = None,
+        params: dict | None = None,
+        json_data: dict | None = None,
         max_retries: int = 3
     ) -> Any:
         """Makes an authenticated request to the Spotify Web API with rate-limit and token refresh handling."""
@@ -266,13 +261,13 @@ class SpotifyConnector(MusicConnectorBase):
 
         raise RateLimitExceededError(f"Request failed after {max_retries} retries: {url}")
 
-    def get_me(self) -> Dict[str, Any]:
+    def get_me(self) -> dict[str, Any]:
         """Gets current authenticated user's profile."""
         return self.api_request("GET", "me")
 
-    def list_playlists(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_playlists(self, limit: int = 50) -> list[dict[str, Any]]:
         """Lists user's playlists."""
-        playlists: List[Dict[str, Any]] = []
+        playlists: list[dict[str, Any]] = []
         url = f"me/playlists?limit={min(limit, 50)}"
 
         while url and len(playlists) < limit:
@@ -305,9 +300,9 @@ class SpotifyConnector(MusicConnectorBase):
             return s.split(":")[-1]
         return s
 
-    def get_artists_data(self, artist_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    def get_artists_data(self, artist_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Batch fetches artist metadata (genres, popularity) in chunks of up to 50."""
-        artists_map: Dict[str, Dict[str, Any]] = {}
+        artists_map: dict[str, dict[str, Any]] = {}
         unique_ids = [aid for aid in dict.fromkeys(artist_ids) if aid]
 
         chunk_size = 50
@@ -330,7 +325,7 @@ class SpotifyConnector(MusicConnectorBase):
     def get_playlist(self, identifier: str) -> Playlist:
         """Fetches full playlist metadata and enriches all tracks with human dimensions."""
         is_liked = identifier.strip().lower() in ("liked", "liked-songs", "saved", "me/tracks", "liked songs")
-        raw_items: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+        raw_items: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
         if is_liked:
             playlist_name = "Liked Songs"
@@ -370,7 +365,7 @@ class SpotifyConnector(MusicConnectorBase):
                 url = page_data.get("next")
 
         # Extract all artist IDs for batch enrichment
-        all_artist_ids: List[str] = []
+        all_artist_ids: list[str] = []
         for it, tr in raw_items:
             for art in tr.get("artists", []):
                 if art.get("id"):
@@ -379,12 +374,12 @@ class SpotifyConnector(MusicConnectorBase):
         artists_info = self.get_artists_data(all_artist_ids)
 
         # Build enriched Track models
-        enriched_tracks: List[Track] = []
+        enriched_tracks: list[Track] = []
         for it, tr in raw_items:
             tr_artists = [a.get("name", "Unknown") for a in tr.get("artists", [])]
             primary_artist = tr_artists[0] if tr_artists else "Unknown"
 
-            combined_genres: List[str] = []
+            combined_genres: list[str] = []
             for art in tr.get("artists", []):
                 aid = art.get("id")
                 if aid and aid in artists_info:
@@ -443,8 +438,8 @@ class SpotifyConnector(MusicConnectorBase):
         name: str,
         description: str = "",
         public: bool = False,
-        tracks: Optional[List[Track]] = None,
-        track_uris: Optional[List[str]] = None
+        tracks: list[Track] | None = None,
+        track_uris: list[str] | None = None
     ) -> Playlist:
         """Creates a new playlist and adds tracks in batches of 100 using current endpoints."""
         me = self.get_me()
@@ -466,13 +461,13 @@ class SpotifyConnector(MusicConnectorBase):
         p_url = data.get("external_urls", {}).get("spotify", "")
 
         # Resolve and validate URIs
-        raw_candidates: List[str] = []
+        raw_candidates: list[str] = []
         if track_uris:
             raw_candidates = list(track_uris)
         elif tracks:
             raw_candidates = [t.uri or t.id for t in tracks]
 
-        resolved_uris: List[str] = []
+        resolved_uris: list[str] = []
         for candidate in raw_candidates:
             normalized = self.validate_and_normalize_track_uri(candidate)
             if normalized:
@@ -509,14 +504,14 @@ class SpotifyClient(SpotifyConnector):
     """Backward compatibility wrapper preserving legacy static methods."""
 
     @staticmethod
-    def declump_tracks_by_artist(tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def declump_tracks_by_artist(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         from mixsmith.core.declumper import declump_tracks
         track_models = [Track.from_dict(t) for t in tracks]
         result_tracks = declump_tracks(track_models, min_spacing=1)[0]
         return [t.to_dict() for t in result_tracks]
 
     @staticmethod
-    def filter_and_sort_tracks(tracks: List[Dict[str, Any]], **kwargs) -> List[Dict[str, Any]]:
+    def filter_and_sort_tracks(tracks: list[dict[str, Any]], **kwargs) -> list[dict[str, Any]]:
         from mixsmith.core.filters import filter_tracks
         track_models = [Track.from_dict(t) for t in tracks]
 
@@ -534,7 +529,10 @@ class SpotifyClient(SpotifyConnector):
         )
 
         if sort_by:
-            from mixsmith.core.sequencing import ConstraintSequencingEngine, CurationConstraints
+            from mixsmith.core.sequencing import (
+                ConstraintSequencingEngine,
+                CurationConstraints,
+            )
             engine = ConstraintSequencingEngine()
             plan = engine.curate(filtered_models, CurationConstraints(sort_mode=sort_by))
             filtered_models = plan.tracks

@@ -1,7 +1,7 @@
 """Unit tests for Curation Explainability Engine."""
 
 import json
-import pytest
+
 from mixsmith.core.sequencing import ConstraintSequencingEngine, CurationConstraints
 
 

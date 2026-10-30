@@ -1,6 +1,5 @@
 """Unit tests for the Hamilton-Hare Largest Remainder Quota Allocation engine."""
 
-import pytest
 from mixsmith.core.quotas import allocate_genre_quotas, allocate_largest_remainder
 
 

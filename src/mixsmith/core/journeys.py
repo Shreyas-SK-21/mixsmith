@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
 from mixsmith.core.models import Track
 from mixsmith.utils.logging import get_logger
 
@@ -41,7 +39,7 @@ DECADE_ORDER = {
 }
 
 
-def sequence_artist_evolution(tracks: List[Track], reverse: bool = False) -> List[Track]:
+def sequence_artist_evolution(tracks: list[Track], reverse: bool = False) -> list[Track]:
     """Arranges tracks in chronological order of release date to trace musical growth."""
     return sorted(
         tracks,
@@ -56,7 +54,7 @@ def sequence_artist_evolution(tracks: List[Track], reverse: bool = False) -> Lis
     )
 
 
-def sequence_decade_journey(tracks: List[Track], reverse: bool = False) -> List[Track]:
+def sequence_decade_journey(tracks: list[Track], reverse: bool = False) -> list[Track]:
     """Sequences tracks smoothly through musical eras (60s -> 70s -> 80s -> 90s -> 2000s -> 2010s -> 2020s)."""
     return sorted(
         tracks,
@@ -69,10 +67,10 @@ def sequence_decade_journey(tracks: List[Track], reverse: bool = False) -> List[
     )
 
 
-def sequence_genre_journey(tracks: List[Track], custom_order: Optional[List[str]] = None) -> List[Track]:
+def sequence_genre_journey(tracks: list[Track], custom_order: list[str] | None = None) -> list[Track]:
     """Sequences tracks to provide smooth sonic transitions between complementary genres."""
     order = custom_order or GENRE_JOURNEY_ORDER
-    idx_map: Dict[str, int] = {g.lower(): i for i, g in enumerate(order)}
+    idx_map: dict[str, int] = {g.lower(): i for i, g in enumerate(order)}
 
     return sorted(
         tracks,
@@ -83,7 +81,7 @@ def sequence_genre_journey(tracks: List[Track], custom_order: Optional[List[str]
     )
 
 
-def sequence_nostalgia_mode(tracks: List[Track], target_decade: str = "90s") -> List[Track]:
+def sequence_nostalgia_mode(tracks: list[Track], target_decade: str = "90s") -> list[Track]:
     """
     Prioritizes tracks from a target decade, placing them as the centerpiece,
     while smoothly easing in from preceding eras and easing out to modern times.

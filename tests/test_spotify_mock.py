@@ -1,9 +1,11 @@
 """Unit tests for Spotify API error handling with mocked network calls."""
 
 from unittest.mock import MagicMock, patch
+
 import pytest
+
 from mixsmith.connectors.spotify import SpotifyConnector
-from mixsmith.core.exceptions import APIError, ResourceNotFoundError
+from mixsmith.core.exceptions import ResourceNotFoundError
 from mixsmith.utils.config import AppConfig
 
 

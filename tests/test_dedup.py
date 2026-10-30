@@ -1,7 +1,10 @@
 """Unit tests for the Intelligent Deduplication Engine."""
 
-import pytest
-from mixsmith.core.dedup import classify_track_variant, deduplicate_tracks, find_duplicates
+from mixsmith.core.dedup import (
+    classify_track_variant,
+    deduplicate_tracks,
+    find_duplicates,
+)
 
 
 def test_classify_track_variants(make_track):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 
 @dataclass
@@ -13,18 +13,18 @@ class Track:
     id: str
     uri: str
     name: str
-    artists: List[str]
+    artists: list[str]
     primary_artist: str = ""
     album: str = ""
     album_type: str = "album"
     release_date: str = ""
-    release_year: Optional[int] = None
+    release_year: int | None = None
     duration_ms: int = 0
     popularity: int = 0
     isrc: str = ""
     explicit: bool = False
     primary_genre: str = "Other / Unclassified"
-    all_genres: List[str] = field(default_factory=list)
+    all_genres: list[str] = field(default_factory=list)
     theme: str = "Eclectic & Diverse"
     era: str = "Contemporary"
     decade: str = "2020s"
@@ -34,8 +34,8 @@ class Track:
     added_at: str = ""
     added_by: str = ""
     spotify_url: str = ""
-    metadata_confidence: Dict[str, str] = field(default_factory=dict)
-    metadata_provenance: Dict[str, str] = field(default_factory=dict)
+    metadata_confidence: dict[str, str] = field(default_factory=dict)
+    metadata_provenance: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.primary_artist and self.artists:
@@ -51,7 +51,7 @@ class Track:
         return ", ".join(self.artists) if self.artists else self.primary_artist or "Unknown"
 
     @property
-    def all_artists(self) -> List[str]:
+    def all_artists(self) -> list[str]:
         """List of all artists (primary and co-artists)."""
         return list(self.artists)
 
@@ -79,7 +79,7 @@ class Track:
                 return True
         return False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serializes track to dictionary format."""
         return {
             "id": self.id,
@@ -132,7 +132,7 @@ class Track:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> Track:
+    def from_dict(cls, data: dict[str, Any]) -> Track:
         """Constructs a Track instance from dictionary or legacy CSV row."""
         # Normalize ID & URI
         uri = data.get("uri") or data.get("Track URI") or ""
@@ -235,7 +235,7 @@ class Playlist:
     description: str = ""
     owner: str = ""
     public: bool = False
-    tracks: List[Track] = field(default_factory=list)
+    tracks: list[Track] = field(default_factory=list)
     total_tracks: int = 0
     url: str = ""
 
@@ -270,12 +270,12 @@ class ConstraintResult:
 class CurationPlan:
     """Result of a playlist curation operation with verification and diff report."""
     playlist_name: str
-    tracks: List[Track]
+    tracks: list[Track]
     initial_track_count: int
     final_track_count: int
-    constraints_evaluated: List[ConstraintResult] = field(default_factory=list)
+    constraints_evaluated: list[ConstraintResult] = field(default_factory=list)
     diff_summary: str = ""
-    explanation: Optional[Any] = None
+    explanation: Any | None = None
 
     @property
     def all_satisfied(self) -> bool:
@@ -286,6 +286,6 @@ class CurationPlan:
 class DuplicateGroup:
     """A cluster of duplicate or variant recordings."""
     canonical_track: Track
-    variants: List[Track]
+    variants: list[Track]
     category: str  # "exact", "remaster", "live", "acoustic", "radio_edit", "deluxe"
     recommended_action: str = "keep_canonical"

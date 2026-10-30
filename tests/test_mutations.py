@@ -1,8 +1,10 @@
 """Tests for safe playlist mutation safeguards and external drift detection."""
 
 from unittest.mock import MagicMock, patch
+
 import pytest
-from mixsmith.connectors.spotify import PlaylistMutationResult, SpotifyConnector
+
+from mixsmith.connectors.spotify import SpotifyConnector
 from mixsmith.core.exceptions import SnapshotDriftError
 from mixsmith.utils.config import AppConfig
 

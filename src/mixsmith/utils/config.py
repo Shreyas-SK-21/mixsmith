@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from mixsmith.utils.logging import get_logger
 
@@ -32,15 +32,15 @@ def get_legacy_plugin_credentials_path() -> Path:
 @dataclass
 class AppConfig:
     """Application configuration and credentials container."""
-    client_id: Optional[str] = None
-    client_secret: Optional[str] = None
+    client_id: str | None = None
+    client_secret: str | None = None
     redirect_uri: str = DEFAULT_REDIRECT_URI
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
-    credentials_file: Optional[Path] = None
+    access_token: str | None = None
+    refresh_token: str | None = None
+    credentials_file: Path | None = None
 
     @classmethod
-    def load(cls, custom_path: Optional[Path] = None) -> AppConfig:
+    def load(cls, custom_path: Path | None = None) -> AppConfig:
         """Loads configuration from environment variables, .env, and credentials files."""
         # Check .env if present
         env_path = Path(".env")
@@ -57,7 +57,7 @@ class AppConfig:
 
         # Resolve credentials file path
         creds_file = None
-        data: Dict[str, Any] = {}
+        data: dict[str, Any] = {}
 
         candidate_paths = []
         if custom_path:
@@ -99,7 +99,7 @@ class AppConfig:
             credentials_file=creds_file
         )
 
-    def save_tokens(self, access_token: str, refresh_token: Optional[str] = None) -> None:
+    def save_tokens(self, access_token: str, refresh_token: str | None = None) -> None:
         """Persists updated OAuth tokens to the resolved credentials file."""
         self.access_token = access_token
         if refresh_token:
@@ -110,7 +110,7 @@ class AppConfig:
 
         self.credentials_file.parent.mkdir(parents=True, exist_ok=True)
 
-        existing: Dict[str, Any] = {}
+        existing: dict[str, Any] = {}
         if self.credentials_file.exists():
             try:
                 with open(self.credentials_file, "r", encoding="utf-8") as f:

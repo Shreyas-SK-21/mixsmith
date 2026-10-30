@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
-import re
-from typing import Any, Dict, List, Optional, Tuple
 
 
 class MetadataConfidence(str, Enum):
@@ -38,7 +37,7 @@ class MetadataInferenceResult:
     rationale: str
 
 
-def infer_primary_genre(genres_list: List[str], user_override: Optional[str] = None) -> MetadataInferenceResult:
+def infer_primary_genre(genres_list: list[str], user_override: str | None = None) -> MetadataInferenceResult:
     """
     Infers a humanly understandable universal genre from granular subgenres,
     tracking confidence and provenance.
@@ -98,7 +97,7 @@ def infer_primary_genre(genres_list: List[str], user_override: Optional[str] = N
     )
 
 
-def classify_primary_genre(genres_list: List[str]) -> str:
+def classify_primary_genre(genres_list: list[str]) -> str:
     """Backward-compatible helper returning genre string."""
     return infer_primary_genre(genres_list).value
 
@@ -106,7 +105,7 @@ def classify_primary_genre(genres_list: List[str]) -> str:
 infer_genre = infer_primary_genre
 
 
-def detect_era_and_decade(release_date: str) -> Tuple[str, str, int]:
+def detect_era_and_decade(release_date: str) -> tuple[str, str, int]:
     """Detects human Era and Decades (e.g. '80s', 'Classic 70s') from release date."""
     if not release_date:
         return "Unknown Era", "Unknown", 0
@@ -137,10 +136,10 @@ def detect_era_and_decade(release_date: str) -> Tuple[str, str, int]:
 
 def infer_language_and_region(
     isrc: str,
-    genres: List[str],
+    genres: list[str],
     title: str,
-    artists: List[str],
-    user_override: Optional[str] = None
+    artists: list[str],
+    user_override: str | None = None
 ) -> MetadataInferenceResult:
     """
     Infers human language and regional music identity from Unicode script,
@@ -263,19 +262,19 @@ def infer_language_and_region(
     )
 
 
-def detect_language_and_region(isrc: str, genres: List[str], title: str, artists: List[str]) -> str:
+def detect_language_and_region(isrc: str, genres: list[str], title: str, artists: list[str]) -> str:
     """Backward-compatible helper returning language string."""
     return infer_language_and_region(isrc, genres, title, artists).value
 
 
 def infer_theme(
     title: str,
-    genres: List[str],
+    genres: list[str],
     primary_genre: str,
     release_year: int,
     popularity: int,
     duration_ms: int,
-    user_override: Optional[str] = None
+    user_override: str | None = None
 ) -> MetadataInferenceResult:
     """Classifies track into human themes with confidence tracking."""
     if user_override:
@@ -392,7 +391,7 @@ def infer_theme(
     )
 
 
-def detect_theme(title: str, genres: List[str], primary_genre: str, release_year: int, popularity: int, duration_ms: int) -> str:
+def detect_theme(title: str, genres: list[str], primary_genre: str, release_year: int, popularity: int, duration_ms: int) -> str:
     """Backward-compatible helper returning theme string."""
     return infer_theme(title, genres, primary_genre, release_year, popularity, duration_ms).value
 

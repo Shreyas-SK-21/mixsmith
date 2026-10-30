@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
-from typing import List, Union
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -17,8 +16,8 @@ logger = get_logger("mixsmith.export.excel")
 
 
 def export_tracks_to_excel(
-    tracks: List[Track],
-    output_path: Union[str, Path],
+    tracks: list[Track],
+    output_path: str | Path,
     playlist_name: str = "Mixsmith Playlist"
 ) -> str:
     """Exports enriched tracks and overview insights to a styled Excel workbook."""
@@ -184,6 +183,6 @@ def export_tracks_to_excel(
     return str(output_file)
 
 
-def export_playlist_to_excel(playlist: Playlist, output_path: Union[str, Path]) -> str:
+def export_playlist_to_excel(playlist: Playlist, output_path: str | Path) -> str:
     """Exports playlist to Excel workbook."""
     return export_tracks_to_excel(playlist.tracks, output_path, playlist_name=playlist.name)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
 
 from mixsmith.core.models import DuplicateGroup, Track
 from mixsmith.utils.logging import get_logger
@@ -55,15 +54,15 @@ def classify_track_variant(track: Track) -> str:
     return "standard"
 
 
-def find_duplicates(tracks: List[Track]) -> List[DuplicateGroup]:
+def find_duplicates(tracks: list[Track]) -> list[DuplicateGroup]:
     """
     Identifies all duplicate clusters in a playlist, distinguishing between exact
     duplicates, remasters, live cuts, acoustic renditions, and radio edits.
     """
-    groups: List[DuplicateGroup] = []
+    groups: list[DuplicateGroup] = []
 
     # 1. First pass: group by ISRC if available (exact recording match)
-    isrc_buckets: Dict[str, List[Track]] = defaultdict(list)
+    isrc_buckets: dict[str, list[Track]] = defaultdict(list)
     remaining_tracks = []
 
     for t in tracks:
@@ -72,7 +71,7 @@ def find_duplicates(tracks: List[Track]) -> List[DuplicateGroup]:
         else:
             remaining_tracks.append(t)
 
-    consumed_ids: Set[str] = set()
+    consumed_ids: set[str] = set()
 
     for isrc, cluster in isrc_buckets.items():
         if len(cluster) > 1:
@@ -89,7 +88,7 @@ def find_duplicates(tracks: List[Track]) -> List[DuplicateGroup]:
             remaining_tracks.extend(cluster)
 
     # 2. Second pass: fuzzy match by normalized title + primary artist
-    title_artist_buckets: Dict[Tuple[str, str], List[Track]] = defaultdict(list)
+    title_artist_buckets: dict[tuple[str, str], list[Track]] = defaultdict(list)
     for t in remaining_tracks:
         if t.id in consumed_ids:
             continue
@@ -101,7 +100,7 @@ def find_duplicates(tracks: List[Track]) -> List[DuplicateGroup]:
     for (norm_title, norm_artist), cluster in title_artist_buckets.items():
         if len(cluster) > 1:
             # Choose canonical: prefer standard studio version with highest popularity
-            def rank_track(item: Track) -> Tuple[int, int]:
+            def rank_track(item: Track) -> tuple[int, int]:
                 variant = classify_track_variant(item)
                 scores = {"standard": 5, "remaster": 4, "deluxe": 3, "radio_edit": 2, "acoustic": 1, "live": 0}
                 return (scores.get(variant, 0), item.popularity)
@@ -130,9 +129,9 @@ def find_duplicates(tracks: List[Track]) -> List[DuplicateGroup]:
 
 
 def deduplicate_tracks(
-    tracks: List[Track],
+    tracks: list[Track],
     strategy: str = "exact_only"
-) -> Tuple[List[Track], List[DuplicateGroup]]:
+) -> tuple[list[Track], list[DuplicateGroup]]:
     """
     Applies deduplication strategy:
     - 'exact_only': Discards only identical recordings/ISRCs, preserving live/acoustic/remastered alternatives.
@@ -145,7 +144,7 @@ def deduplicate_tracks(
     if strategy == "keep_all" or not duplicate_groups:
         return list(tracks), duplicate_groups
 
-    tracks_to_remove: Set[str] = set()
+    tracks_to_remove: set[str] = set()
 
     for g in duplicate_groups:
         if strategy == "exact_only":

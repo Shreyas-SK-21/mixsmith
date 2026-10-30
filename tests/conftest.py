@@ -1,7 +1,8 @@
 """Pytest fixtures and synthetic track fixtures for Mixsmith."""
 
 import pytest
-from mixsmith.core.models import Track, Playlist
+
+from mixsmith.core.models import Track
 
 
 @pytest.fixture

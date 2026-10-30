@@ -1,6 +1,7 @@
 """Unit tests for track filtering and AST expression evaluation."""
 
 import pytest
+
 from mixsmith.core.exceptions import FilterSyntaxError
 from mixsmith.core.filters import evaluate_filter_expression, filter_tracks
 

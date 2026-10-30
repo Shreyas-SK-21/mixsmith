@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from mixsmith.core.models import ConstraintResult, Track
+from mixsmith.core.models import ConstraintResult
 
 
 @dataclass
@@ -19,16 +19,16 @@ class TrackCurationDecision:
     """Deterministic explanation record for a single track's lifecycle in the curation pipeline."""
     track_id: str
     track_name: str
-    artists: List[str]
+    artists: list[str]
     selected: bool
-    position: Optional[int] = None  # 1-based playlist index
-    selection_reasons: List[str] = field(default_factory=list)
-    exclusion_reasons: List[str] = field(default_factory=list)
+    position: int | None = None  # 1-based playlist index
+    selection_reasons: list[str] = field(default_factory=list)
+    exclusion_reasons: list[str] = field(default_factory=list)
     placement_reason: str = ""
-    constraints_applied: List[str] = field(default_factory=list)
-    constraints_relaxed: List[str] = field(default_factory=list)
+    constraints_applied: list[str] = field(default_factory=list)
+    constraints_relaxed: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -39,9 +39,9 @@ class CurationExplanation:
     source_track_count: int
     final_track_count: int
     duration_achieved_ms: int
-    duration_target_minutes: Optional[int]
-    constraint_audits: List[ConstraintResult] = field(default_factory=list)
-    track_decisions: List[TrackCurationDecision] = field(default_factory=list)
+    duration_target_minutes: int | None
+    constraint_audits: list[ConstraintResult] = field(default_factory=list)
+    track_decisions: list[TrackCurationDecision] = field(default_factory=list)
     diff_summary: str = ""
 
     @property
@@ -54,7 +54,7 @@ class CurationExplanation:
             return f"{h}h {m}m {s}s"
         return f"{m}m {s}s"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "playlist_name": self.playlist_name,
             "source_track_count": self.source_track_count,

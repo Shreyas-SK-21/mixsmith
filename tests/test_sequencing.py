@@ -1,11 +1,8 @@
 """Unit tests for Constraint-Based Playlist Sequencing Engine."""
 
-import pytest
 from mixsmith.core.journeys import (
     sequence_artist_evolution,
     sequence_decade_journey,
-    sequence_genre_journey,
-    sequence_nostalgia_mode,
 )
 from mixsmith.core.sequencing import ConstraintSequencingEngine, CurationConstraints
 

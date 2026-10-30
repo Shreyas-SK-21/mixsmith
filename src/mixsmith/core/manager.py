@@ -6,9 +6,8 @@ import json
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
-from mixsmith.core.dedup import deduplicate_tracks
 from mixsmith.core.models import Playlist, Track
 from mixsmith.utils.config import get_default_config_dir
 from mixsmith.utils.logging import get_logger
@@ -16,9 +15,9 @@ from mixsmith.utils.logging import get_logger
 logger = get_logger("mixsmith.manager")
 
 
-def split_by_genre(playlist: Playlist) -> Dict[str, Playlist]:
+def split_by_genre(playlist: Playlist) -> dict[str, Playlist]:
     """Splits a playlist into sub-playlists grouped by primary genre."""
-    groups: Dict[str, List[Track]] = defaultdict(list)
+    groups: dict[str, list[Track]] = defaultdict(list)
     for t in playlist.tracks:
         groups[t.primary_genre].append(t)
 
@@ -35,9 +34,9 @@ def split_by_genre(playlist: Playlist) -> Dict[str, Playlist]:
     return result
 
 
-def split_by_decade(playlist: Playlist) -> Dict[str, Playlist]:
+def split_by_decade(playlist: Playlist) -> dict[str, Playlist]:
     """Splits a playlist into sub-playlists grouped by decade."""
-    groups: Dict[str, List[Track]] = defaultdict(list)
+    groups: dict[str, list[Track]] = defaultdict(list)
     for t in playlist.tracks:
         groups[t.decade].append(t)
 
@@ -55,14 +54,14 @@ def split_by_decade(playlist: Playlist) -> Dict[str, Playlist]:
 
 
 def merge_playlists(
-    playlists: List[Playlist],
+    playlists: list[Playlist],
     name: str = "Merged Playlist",
     description: str = "",
     deduplicate: bool = True
 ) -> Playlist:
     """Merges multiple playlists into one, optionally deduplicating tracks."""
-    combined_tracks: List[Track] = []
-    seen_ids: Set[str] = set()
+    combined_tracks: list[Track] = []
+    seen_ids: set[str] = set()
 
     for p in playlists:
         for t in p.tracks:
@@ -81,7 +80,7 @@ def merge_playlists(
     )
 
 
-def compare_playlists(p1: Playlist, p2: Playlist) -> Dict[str, Any]:
+def compare_playlists(p1: Playlist, p2: Playlist) -> dict[str, Any]:
     """Compares two playlists, calculating overlap, differences, and Jaccard similarity."""
     set1 = {t.id: t for t in p1.tracks}
     set2 = {t.id: t for t in p2.tracks}
@@ -106,7 +105,7 @@ def compare_playlists(p1: Playlist, p2: Playlist) -> Dict[str, Any]:
     }
 
 
-def save_playlist_snapshot(playlist: Playlist, snapshot_dir: Optional[Path] = None) -> Path:
+def save_playlist_snapshot(playlist: Playlist, snapshot_dir: Path | None = None) -> Path:
     """Saves a JSON snapshot of a playlist state before modification."""
     target_dir = snapshot_dir or (get_default_config_dir() / "snapshots")
     target_dir.mkdir(parents=True, exist_ok=True)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import random
-from typing import List, Optional, Set
 
 from mixsmith.core.models import Track
 
@@ -15,7 +14,7 @@ def generate_synthetic_library(
     zipf_param: float = 1.3,
     collaboration_rate: float = 0.25,
     seed: int = 42
-) -> List[Track]:
+) -> list[Track]:
     """
     Generates a realistic synthetic music library with Zipf-distributed artist frequencies
     and multi-artist collaborations.
@@ -33,7 +32,7 @@ def generate_synthetic_library(
         "Electronic / Dance", "R&B / Soul", "Shoegaze / Dream Pop"
     ]
 
-    tracks: List[Track] = []
+    tracks: list[Track] = []
     for idx in range(1, n_tracks + 1):
         # Pick primary artist according to Zipf distribution
         primary = rng.choices(artist_pool, weights=prob_dist, k=1)[0]
@@ -70,9 +69,9 @@ def generate_synthetic_library(
 
 
 def exact_backtracking_declumper(
-    tracks: List[Track],
+    tracks: list[Track],
     min_spacing: int = 1
-) -> Optional[List[Track]]:
+) -> list[Track] | None:
     """
     Exact backtracking solver oracle for small track sets (N <= 15).
     Guarantees finding a zero-violation schedule if one mathematically exists.
@@ -83,7 +82,7 @@ def exact_backtracking_declumper(
         return list(tracks)
 
     used = [False] * n
-    current_schedule: List[Track] = []
+    current_schedule: list[Track] = []
 
     def can_place(track: Track, pos: int) -> bool:
         start_check = max(0, pos - min_spacing)

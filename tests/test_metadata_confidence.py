@@ -1,10 +1,8 @@
 """Tests for confidence-aware metadata inference and user overrides."""
 
-import pytest
 from mixsmith.utils.metadata import (
     MetadataConfidence,
     MetadataProvenance,
-    infer_genre,
     infer_language_and_region,
     infer_primary_genre,
     infer_theme,

@@ -1,6 +1,5 @@
 """Unit tests for Natural Language Curation Schema and Parser."""
 
-import pytest
 from mixsmith.ai.parser import parse_natural_language_heuristics
 from mixsmith.ai.schema import NaturalLanguageCurationSpec
 

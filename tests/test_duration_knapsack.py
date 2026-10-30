@@ -1,6 +1,5 @@
 """Unit tests for Duration Optimization (0/1 Knapsack)."""
 
-import pytest
 from mixsmith.core.duration import optimize_playlist_duration
 
 

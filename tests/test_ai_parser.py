@@ -1,19 +1,16 @@
 """Tests for advanced natural language curation parsing and conflict detection."""
 
 import pytest
+
 from mixsmith.ai.parser import (
     OfflineHeuristicProvider,
     execute_natural_language_curation,
-    parse_natural_language_heuristics,
     parse_natural_language_to_spec,
 )
 from mixsmith.ai.schema import (
     CurationSpecification,
     HardConstraints,
-    SoftConstraints,
-    Preferences,
 )
-from mixsmith.core.models import Track
 
 
 def test_parse_tiered_constraints():

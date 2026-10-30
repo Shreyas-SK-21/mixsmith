@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import List, Union
 
 from mixsmith.core.models import Playlist, Track
 from mixsmith.utils.logging import get_logger
@@ -40,7 +39,7 @@ CSV_HEADERS = [
 ]
 
 
-def export_tracks_to_csv(tracks: List[Track], output_path: Union[str, Path]) -> str:
+def export_tracks_to_csv(tracks: list[Track], output_path: str | Path) -> str:
     """Exports tracks to standard Exportify-compatible CSV with UTF-8 BOM."""
     output_file = Path(output_path).resolve()
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +80,6 @@ def export_tracks_to_csv(tracks: List[Track], output_path: Union[str, Path]) -> 
     return str(output_file)
 
 
-def export_playlist_to_csv(playlist: Playlist, output_path: Union[str, Path]) -> str:
+def export_playlist_to_csv(playlist: Playlist, output_path: str | Path) -> str:
     """Exports playlist to CSV."""
     return export_tracks_to_csv(playlist.tracks, output_path)
