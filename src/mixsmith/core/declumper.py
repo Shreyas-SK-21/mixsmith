@@ -217,9 +217,13 @@ def declump_tracks(
             return {a.lower().strip() for a in t.artists if a.strip()}
         return {t.primary_artist.lower().strip()} if t.primary_artist else {"unknown"}
 
+    # Pre-cache artist sets and global frequencies for fast O(1) candidate evaluation
+    track_artists_map: Dict[str, Set[str]] = {}
     remaining_artist_frequency: Dict[str, int] = defaultdict(int)
     for t in tracks:
-        for a in get_track_artists(t):
+        a_set = get_track_artists(t)
+        track_artists_map[t.id] = a_set
+        for a in a_set:
             remaining_artist_frequency[a] += 1
 
     result: List[Track] = []
@@ -236,25 +240,25 @@ def declump_tracks(
         for s in recent_history:
             recent_artists.update(s)
 
-        valid_candidates: List[Track] = []
-        conflicting_candidates: List[Track] = []
+        valid_candidates: List[Tuple[int, Track, Set[str]]] = []
+        conflicting_candidates: List[Tuple[int, Track, Set[str]]] = []
 
-        for t in remaining_tracks:
-            t_artists = get_track_artists(t)
+        for idx, t in enumerate(remaining_tracks):
+            t_artists = track_artists_map[t.id]
             if not (t_artists & recent_artists):
-                valid_candidates.append(t)
+                valid_candidates.append((idx, t, t_artists))
             else:
-                conflicting_candidates.append(t)
+                conflicting_candidates.append((idx, t, t_artists))
 
         if valid_candidates:
             # Score: prioritize tracks whose artists have highest remaining global frequency
-            def score_candidate(t: Track) -> Tuple[int, int]:
-                freq_score = sum(remaining_artist_frequency[a] for a in get_track_artists(t))
-                min_dist = min((current_idx - last_placed_index.get(a, -1000) for a in get_track_artists(t)), default=1000)
+            def score_cand(item: Tuple[int, Track, Set[str]]) -> Tuple[int, int]:
+                t_arts = item[2]
+                freq_score = sum(remaining_artist_frequency[a] for a in t_arts)
+                min_dist = min((current_idx - last_placed_index.get(a, -1000) for a in t_arts), default=1000)
                 return (freq_score, min_dist)
 
-            best_track = max(valid_candidates, key=score_candidate)
-            t_artists = get_track_artists(best_track)
+            best_idx, best_track, t_artists = max(valid_candidates, key=score_cand)
             min_prev_gap = min((current_idx - last_placed_index[a] - 1 for a in t_artists if a in last_placed_index), default=None)
             decision_reason = (
                 f"Selected from {len(valid_candidates)} valid candidate(s) with no artist overlap in the last {min_spacing} track(s). "
@@ -265,11 +269,11 @@ def declump_tracks(
             # Graceful fallback: maximize the distance from the most recent appearance
             violations_count += 1
 
-            def fallback_score(t: Track) -> int:
-                return min((current_idx - last_placed_index.get(a, -1) for a in get_track_artists(t)), default=0)
+            def fallback_score(item: Tuple[int, Track, Set[str]]) -> int:
+                t_arts = item[2]
+                return min((current_idx - last_placed_index.get(a, -1) for a in t_arts), default=0)
 
-            best_track = max(conflicting_candidates, key=fallback_score)
-            t_artists = get_track_artists(best_track)
+            best_idx, best_track, t_artists = max(conflicting_candidates, key=fallback_score)
             min_prev_gap = min((current_idx - last_placed_index[a] - 1 for a in t_artists if a in last_placed_index), default=0)
             decision_reason = (
                 f"Constraint relaxed: No candidate had 0 overlap with last {min_spacing} tracks. "
@@ -277,7 +281,9 @@ def declump_tracks(
             )
             relaxed = True
 
-        remaining_tracks.remove(best_track)
+        # O(1) removal from remaining_tracks
+        remaining_tracks[best_idx] = remaining_tracks[-1]
+        remaining_tracks.pop()
         result.append(best_track)
 
         placement_decisions.append(PlacementDecision(
@@ -301,7 +307,7 @@ def declump_tracks(
     artist_positions: Dict[str, List[int]] = defaultdict(list)
 
     for idx, t in enumerate(result):
-        for a in get_track_artists(t):
+        for a in track_artists_map[t.id]:
             artist_positions[a].append(idx)
 
     for a, positions in artist_positions.items():

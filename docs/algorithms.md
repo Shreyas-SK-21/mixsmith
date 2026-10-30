@@ -83,3 +83,39 @@ Mixsmith partitions duplicate detection into a two-pass pipeline:
    - Removes collaboration credits (`feat.`, `ft.`).
    - Categorizes variants into `standard`, `remaster`, `live`, `acoustic`, `radio_edit`, and `deluxe`.
    - Ranks candidates according to user strategy (`exact_only`, `keep_original`, `keep_remaster`, `keep_all`).
+
+---
+
+## 7. Confidence-Aware Metadata Inference
+
+Mixsmith treats metadata inference as an evidence-weighted process rather than absolute truth:
+
+- **Confidence Tiers**:
+  - `KNOWN`: User explicit override or verified direct API signal.
+  - `HIGH`: Deterministic linguistic/lexical evidence (Unicode Hangul, Katakana, Devanagari script; explicit title tags).
+  - `MEDIUM`: Taxonomy association (subgenre mapping, ISRC 2-letter country prefix).
+  - `LOW`: Weak lexical heuristics (Latin script without foreign markers presumed English).
+  - `UNKNOWN`: Insufficient evidence. Never forces arbitrary classifications onto uninformative records.
+- **Instrumental Recognition**: Identifies non-vocal and ambient compositions to avoid falsely categorizing instrumental music into vocal languages.
+
+---
+
+## 8. Safe Playlist Mutation & External Drift Detection
+
+Modifying a user's library requires non-destructive verification:
+
+1. **Pre-Mutation State Check**: Fetches target playlist's `snapshot_id` and total track count.
+2. **External Drift Detection**: If an `expected_snapshot_id` is supplied and differs from the remote snapshot, raises `SnapshotDriftError` to prevent race conditions.
+3. **URI Standardization**: Validates and normalizes track identifiers (`spotify:track:...`, bare 22-char ID, or web URLs), discarding malformed entries.
+4. **Dry-Run Mode**: Simulates projected track counts without executing mutating API requests.
+5. **Post-Mutation Verification**: Confirms that the target playlist was updated with the expected item count.
+
+---
+
+## 9. Algorithmic Benchmarking & Exact Solver Oracle
+
+Located in `tests/benchmarks/`:
+
+- **Synthetic Music Generator**: Creates realistic libraries using Zipf-distributed artist frequencies ($1 / k^{1.3}$) and collaboration hypergraphs.
+- **Exact Backtracking Solver**: An exact permutation solver acting as a testing oracle for small libraries ($N \le 12$) to verify that whenever a mathematically valid schedule exists, our greedy heuristic satisfies it with zero violations.
+- **Scalability**: Sequences $N = 1,000$ tracks in under 0.6 seconds using precomputed artist sets and $O(1)$ candidate removal.

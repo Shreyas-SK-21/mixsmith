@@ -27,9 +27,10 @@ class DurationOptimizationResult:
 
 def optimize_playlist_duration(
     tracks: List[Track],
-    target_minutes: int,
+    target_minutes: Optional[int] = None,
     tolerance_minutes: int = 10,
-    time_unit_seconds: int = 5
+    time_unit_seconds: int = 5,
+    target_duration_minutes: Optional[int] = None
 ) -> DurationOptimizationResult:
     """
     Selects a subset of tracks to match target duration within [target - tol, target + tol],
@@ -41,7 +42,8 @@ def optimize_playlist_duration(
     Uses scaled discrete dynamic programming (0/1 Knapsack) for datasets <= 250 tracks,
     and a bounded approximation heuristic for larger libraries.
     """
-    target_ms = target_minutes * 60 * 1000
+    effective_minutes = target_duration_minutes if target_duration_minutes is not None else (target_minutes or 60)
+    target_ms = effective_minutes * 60 * 1000
     tol_ms = tolerance_minutes * 60 * 1000
     min_acceptable_ms = max(0, target_ms - tol_ms)
     max_acceptable_ms = target_ms + tol_ms

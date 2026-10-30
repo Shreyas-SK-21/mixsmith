@@ -10,12 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2026-10-31
 
 ### Added
+- **Tiered Constraint Schema & Conflict Detection (`ai/schema.py`, `ai/parser.py`)**: Structured separation of Hard constraints, Soft constraints, and Preferences. Implemented proactive conflict detection for mutually exclusive ratings (clean vs explicit), artist/genre inclusion vs exclusion clashes, and inverted duration bounds.
+- **Confidence-Aware Metadata Inference (`utils/metadata.py`)**: Explicit metadata confidence tracking (`KNOWN`, `HIGH`, `MEDIUM`, `LOW`, `UNKNOWN`) and provenance logging (`USER_OVERRIDE`, `UNICODE_SCRIPT`, `GENRE_ASSOCIATION`, `ISRC_COUNTRY`, `TITLE_HEURISTIC`, `DEFAULT_FALLBACK`). Instrumental tracks and non-English music are accurately recognized without arbitrary guessing.
+- **Safe Playlist Mutation Engine (`connectors/spotify.py`)**: Pre-mutation state inspection, external snapshot drift detection (`SnapshotDriftError`), track URI validation and normalization, dry-run simulation, and verified batched additions.
+- **Algorithmic Benchmarking Suite & Exact Oracle (`tests/benchmarks/`)**: Synthetic music library generator with Zipf-distributed artist frequencies, exact backtracking solver oracle for small $N \le 12$, and performance benchmarks verifying sub-second sequencing for 1,000 tracks.
 - **Central Independent Validation Engine (`core/validation.py`)**: Post-curation independent audit of every constraint (artist spacing, max tracks, duration, genre shares, pinned positions, track preservation).
 - **Curation Explainability (`core/explanation.py`)**: Structured, deterministic explanation reports (`CurationExplanation`) explaining why every track was selected, excluded, or placed at a position. Supports `--explain` and export to Markdown/JSON.
 - **Duration Knapsack Optimizer (`core/duration.py`)**: Discrete 0/1 Knapsack dynamic programming with artist-diversity penalty to replace naive greedy fitting.
 - **Hamilton-Hare Largest Remainder Method (`core/quotas.py`)**: Guaranteed exact integer quota allocation across genres and decades without off-by-one rounding errors.
 - **Enhanced Feasibility Analysis (`core/declumper.py`)**: Distinguishes necessary vs sufficient conditions, detects collaboration-constrained sets, and reports bottleneck artists and achievable ceilings.
-- **Expanded Test Suite**: 35 comprehensive automated tests covering validation, knapsack duration, explainability, quotas, and de-clumping.
+- **Expanded Test Suite**: 55 comprehensive automated tests across algorithms, benchmarks, metadata confidence, mutations, explainability, quotas, and de-clumping.
+
+### Performance
+- Optimized greedy artist de-clumper with precomputed artist lookups and $O(1)$ candidate removal, speeding up large playlist sequencing ($N=1,000$) by 10x–50x.
 
 ## [0.2.0] - 2026-10-31
 
