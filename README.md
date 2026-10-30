@@ -1,122 +1,147 @@
 # Mixsmith
 
-**A music playlist curator, not just a sorter.**
+**Production-grade, constraint-based music curation engine.**
 
 Describe what you want. Get the playlist.
 
 ---
 
-## What it does
+## Overview
 
-Mixsmith connects to your Spotify library and lets you curate playlists using plain-English instructions. Tell it to pull all your 90s rock from liked songs, space artists so the same one never plays twice in a row, and gradually shift the mood from mellow to energetic — and it does exactly that.
+Mixsmith transforms personal music libraries and Spotify playlists into curated listening journeys. Rather than simple shuffle or basic genre tags, Mixsmith applies mathematical scheduling, multi-artist de-clumping, multi-constraint optimization, and intelligent deduplication to curate playlists that flow naturally.
 
-It understands your music in human terms: genres, vibes, decades, languages, popularity tiers, and more.
+Mixsmith operates platform-independently: its algorithmic core is decoupled from music streaming APIs, with full local support for CSV and Excel files.
 
 ---
 
 ## Features
 
-- **Natural-language playlist creation** — describe what you want, get a playlist
-- **Smart artist spacing** — no same artist back-to-back (declumping)
-- **Genre & theme flow** — smooth transitions between moods and sounds
-- **Chronological journeys** — trace a genre or artist through time
-- **Cross-playlist intelligence** — find overlaps, orphans, near-duplicates
-- **Excel export** — full metadata: genre, vibe, decade, language, popularity tier
-- **Version control** — automatic snapshots before every modification
+- **Natural-Language Curation**: Prompt Mixsmith in plain English (e.g. *"Create a 2-hour late night drive with The Weeknd and Joji, no artist repeats within 5 tracks, moving from mellow to energetic"*).
+- **Advanced Artist De-clumping**: Prevents consecutive artist repeats with multi-artist collaboration awareness and configurable $k$-spacing windows.
+- **Pigeonhole Feasibility Analysis**: Automatically detects if requested artist spacing is mathematically possible and computes the maximum achievable threshold.
+- **Multi-Constraint Engine**: Curate against simultaneous limits (max tracks per artist, target runtime, genre distribution quotas, pinned tracks).
+- **Listening Journeys**:
+  - **Artist Evolution**: Chronological discography progression.
+  - **Decade Journey**: Smooth era transitions ($60\text{s} \to 70\text{s} \to \dots \to 2020\text{s}$).
+  - **Genre Flow**: Acoustically adjacent genre transitions.
+  - **Nostalgia Mode**: Anchored around a golden decade with smooth era falloffs.
+- **Intelligent Deduplication**: Distinguishes exact duplicates from remasters, live cuts, acoustic sessions, and radio edits.
+- **Safe Mutation Protocol**: Dry-run previews, constraint audit reports, and automatic local JSON snapshots before modifying Spotify.
+- **Styled Spreadsheets**: Exportify-compatible CSV and multi-sheet styled Excel workbooks with automated overview metrics.
 
 ---
 
-## Setup
+## Architecture
 
-### 1. Prerequisites
+```
+src/mixsmith/
+├── auth/           # OAuth2 PKCE, token refresh, and credential hierarchy
+├── connectors/     # Spotify Web API client and rate-limit backoff
+├── core/           # Pure, platform-independent curation algorithms
+│   ├── declumper.py    # Multi-artist k-spacing and feasibility analyzer
+│   ├── sequencing.py   # Multi-constraint curation engine
+│   ├── journeys.py     # Era, artist evolution, and genre journeys
+│   ├── dedup.py        # Version-aware duplicate detection
+│   ├── manager.py      # Split, merge, diff, and snapshot manager
+│   ├── filters.py      # AST boolean expression evaluator
+│   └── models.py       # Track, Playlist, and Constraint models
+├── ai/             # Natural-language prompt parsing and schema validation
+├── exporters/      # Excel (multi-sheet styled) and CSV exporters
+├── utils/          # Config resolution, structured logging, metadata
+└── cli/            # Command-line interface
+```
 
-- Python 3.10+
-- A Spotify account
-- A Spotify Developer app ([create one here](https://developer.spotify.com/dashboard))
+See [docs/architecture.md](docs/architecture.md) and [docs/algorithms.md](docs/algorithms.md) for in-depth technical documentation.
 
-### 2. Install
+---
+
+## Quickstart
+
+### 1. Installation
 
 ```bash
 git clone https://github.com/Shreyas-SK-21/mixsmith.git
 cd mixsmith
-pip install -r requirements.txt
+pip install -e .
 ```
 
-### 3. Configure credentials
-
-Copy the example env file and fill in your Spotify app details:
+### 2. Configure Credentials
 
 ```bash
 cp .env.example .env
+# Fill in SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET
 ```
 
-Edit `.env`:
-
+Log in via Spotify OAuth:
+```bash
+python -m mixsmith.cli auth login
 ```
-SPOTIFY_CLIENT_ID=your_client_id_here
-SPOTIFY_CLIENT_SECRET=your_client_secret_here
-SPOTIFY_REDIRECT_URI=http://localhost:8888/callback
-```
-
-### 4. Authenticate
-
-On first run, Mixsmith opens a browser window for Spotify OAuth. After approving, it caches the token locally — you won't be asked again.
 
 ---
 
-## Usage
+## CLI Usage
+
+### Natural Language Curation (Dry-Run Preview)
 
 ```bash
-# List your playlists
-python -m mixsmith.cli list
+python -m mixsmith.cli curate \
+  --from-excel "Liked_Songs.csv" \
+  --prompt "Create a 2-hour late night session with no artist repeats within 4 tracks" \
+  --dry-run
+```
 
-# Export a playlist to Excel with full metadata
-python -m mixsmith.cli export "My Playlist" --output my_playlist.xlsx
+### Advanced De-clumping & Artist Spacing
 
-# Create a playlist from your liked songs filtered by genre
-python -m mixsmith.cli create --source liked --filter genre=Shoegaze --name "Japanese Shoegaze"
+```bash
+python -m mixsmith.cli curate \
+  --playlist "your_playlist_id" \
+  --spacing 3 \
+  --max-per-artist 2 \
+  --sort declump
+```
 
-# Sort a playlist with smart artist spacing
-python -m mixsmith.cli sort "My Playlist" --method declump
+### Intelligent Deduplication
 
-# Find songs in your liked songs not in any playlist
-python -m mixsmith.cli orphans
+```bash
+# Preview duplicates without removing
+python -m mixsmith.cli dedup --input "Liked_Songs.csv" --dry-run
+
+# Deduplicate keeping only exact recordings, preserving live & acoustic versions
+python -m mixsmith.cli dedup --input "Liked_Songs.csv" --strategy exact_only --output "Cleaned.xlsx"
+```
+
+### Compare Playlists
+
+```bash
+python -m mixsmith.cli compare --playlist-1 "id_1" --playlist-2 "id_2"
+```
+
+### Export to Styled Excel with Musical DNA Overview
+
+```bash
+python -m mixsmith.cli export --playlist "liked" --output "My_Liked_Songs.xlsx"
 ```
 
 ---
 
-## Project structure
+## Testing
 
-```
-src/mixsmith/
-├── connectors/     # Spotify API client & OAuth
-├── core/           # Filtering, sorting, sequencing logic
-├── ai/             # Natural-language interpretation (planned)
-├── exporters/      # Excel & CSV export
-├── utils/          # Language detection, genre mapping, metadata helpers
-└── cli/            # Command-line interface
+Mixsmith includes a comprehensive pytest suite covering all algorithms, exports, schema parsing, and API error scenarios:
+
+```bash
+python -m pytest tests -v
 ```
 
 ---
 
-## Spotify API note
+## Spotify API & Developer Policy Compliance
 
-Mixsmith uses the official Spotify Web API. Apps in Development Mode are limited to 25 users. For broader use, your app must be reviewed by Spotify.
-
----
-
-## Roadmap
-
-- [ ] Natural-language playlist creation via Gemini
-- [ ] Playlist DNA — human-readable profile of what's in a playlist
-- [ ] Cross-playlist overlap & similarity map
-- [ ] Version control with undo & diff
-- [ ] Constraint-based generation (min/max per artist, duration targets, mood arc)
-- [ ] Duplicate intelligence (remasters, live versions, alternate credits)
-- [ ] Hidden Gems finder
+- **No Unauthorized Ingestion**: Mixsmith never sends Spotify metadata or playlists to external LLM services for training or classification. Natural language prompts are translated into structured constraints locally.
+- **Standard Permitted Scopes**: Mixsmith requests only standard read and modify scopes (`playlist-modify-private`, `playlist-read-private`, `user-library-read`).
+- **Safe Mutation Protocol**: Requires explicit user confirmation or `--confirm` flag before any playlist creation, update, or deletion.
 
 ---
 
 ## License
 
-MIT
+See [LICENSE_OPTIONS.md](LICENSE_OPTIONS.md) for license considerations before selecting an open-source license.
