@@ -342,7 +342,7 @@ class SpotifyClient(SpotifyConnector):
     def declump_tracks_by_artist(tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         from mixsmith.core.declumper import declump_tracks
         track_models = [Track.from_dict(t) for t in tracks]
-        result_tracks, _ = declump_tracks(track_models, min_spacing=1)
+        result_tracks = declump_tracks(track_models, min_spacing=1)[0]
         return [t.to_dict() for t in result_tracks]
 
     @staticmethod

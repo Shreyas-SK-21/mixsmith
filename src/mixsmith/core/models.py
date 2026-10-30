@@ -268,6 +268,7 @@ class CurationPlan:
     final_track_count: int
     constraints_evaluated: List[ConstraintResult] = field(default_factory=list)
     diff_summary: str = ""
+    explanation: Optional[Any] = None
 
     @property
     def all_satisfied(self) -> bool:

@@ -235,6 +235,18 @@ def handle_curate(args):
     for idx, t in enumerate(plan.tracks[:10], 1):
         print(f"  {idx:>2}. {t.name:<30} — {t.artist_display:<25} ({t.primary_genre})")
 
+    # Curation Explainability Report
+    if getattr(args, "explain", False) or getattr(args, "explain_output", None):
+        if plan.explanation:
+            fmt = getattr(args, "explain_format", "markdown")
+            report_text = plan.explanation.to_json() if fmt == "json" else plan.explanation.to_markdown()
+            if getattr(args, "explain", False):
+                print("\n" + report_text)
+            if getattr(args, "explain_output", None):
+                with open(args.explain_output, "w", encoding="utf-8") as f:
+                    f.write(report_text)
+                print(f"\n[SUCCESS] Saved explanation report to {args.explain_output}")
+
     if args.dry_run:
         print("\n[DRY RUN] No modifications were made to Spotify.")
         return
@@ -365,6 +377,9 @@ def main():
     p_curate.add_argument("--dry-run", action="store_true", help="Preview plan without creating on Spotify")
     p_curate.add_argument("--confirm", action="store_true", help="Auto-confirm Spotify creation")
     p_curate.add_argument("--public", action="store_true", help="Make playlist public")
+    p_curate.add_argument("--explain", action="store_true", help="Display comprehensive curation explanation report")
+    p_curate.add_argument("--explain-format", choices=["markdown", "json"], default="markdown", help="Format for explanation report")
+    p_curate.add_argument("--explain-output", help="Save explanation report to file (e.g. report.md)")
 
     # Subcommand: dedup
     p_dedup = subparsers.add_parser("dedup", help="Detect and resolve duplicates and version variants")

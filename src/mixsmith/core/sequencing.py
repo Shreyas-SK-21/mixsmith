@@ -1,4 +1,4 @@
-"""Multi-constraint playlist sequencing engine."""
+"""Multi-constraint playlist sequencing and curation engine with full explainability."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 from mixsmith.core.declumper import analyze_spacing_feasibility, declump_tracks
+from mixsmith.core.duration import optimize_playlist_duration
+from mixsmith.core.explanation import CurationExplanation, TrackCurationDecision
 from mixsmith.core.journeys import (
     sequence_artist_evolution,
     sequence_decade_journey,
@@ -14,6 +16,8 @@ from mixsmith.core.journeys import (
     sequence_nostalgia_mode,
 )
 from mixsmith.core.models import ConstraintResult, CurationPlan, Track
+from mixsmith.core.quotas import allocate_genre_quotas
+from mixsmith.core.validation import PlaylistValidator
 from mixsmith.utils.logging import get_logger
 
 logger = get_logger("mixsmith.sequencing")
@@ -43,11 +47,23 @@ class ConstraintSequencingEngine:
         constraints: Optional[CurationConstraints] = None,
         playlist_name: str = "Curated Playlist"
     ) -> CurationPlan:
-        """Executes multi-constraint curation and produces an audited CurationPlan."""
+        """Executes multi-constraint curation, independent validation, and compiles a CurationExplanation."""
         constraints = constraints or CurationConstraints()
         initial_count = len(tracks)
         current = list(tracks)
-        results: List[ConstraintResult] = []
+
+        # Decision tracking dictionary for explainability: track_id -> TrackCurationDecision
+        decisions: Dict[str, TrackCurationDecision] = {
+            t.id: TrackCurationDecision(
+                track_id=t.id,
+                track_name=t.name,
+                artists=t.artists,
+                selected=True,
+                selection_reasons=["Included in candidate pool"],
+                constraints_applied=[]
+            )
+            for t in tracks
+        }
 
         # 1. Enforce max tracks per artist
         if constraints.max_tracks_per_artist is not None and constraints.max_tracks_per_artist > 0:
@@ -58,88 +74,62 @@ class ConstraintSequencingEngine:
                 artist_buckets[a_key].append(t)
 
             pruned: List[Track] = []
-            capped_artists = []
             for a_key, a_tracks in artist_buckets.items():
                 if len(a_tracks) > limit:
                     # Keep tracks with highest popularity
                     sorted_a = sorted(a_tracks, key=lambda t: t.popularity, reverse=True)
-                    pruned.extend(sorted_a[:limit])
-                    capped_artists.append(f"{a_tracks[0].primary_artist} ({len(a_tracks)}->{limit})")
+                    retained = sorted_a[:limit]
+                    pruned.extend(retained)
+                    for t in retained:
+                        decisions[t.id].selection_reasons.append(f"Retained within {t.primary_artist} max {limit} quota (popularity {t.popularity})")
+                        decisions[t.id].constraints_applied.append("max_tracks_per_artist")
+                    for t in sorted_a[limit:]:
+                        decisions[t.id].selected = False
+                        decisions[t.id].exclusion_reasons.append(
+                            f"Excluded: Artist '{t.primary_artist}' reached max limit of {limit} tracks."
+                        )
+                        decisions[t.id].constraints_applied.append("max_tracks_per_artist")
                 else:
                     pruned.extend(a_tracks)
+                    for t in a_tracks:
+                        decisions[t.id].constraints_applied.append("max_tracks_per_artist")
 
             current = pruned
-            satisfied = len(capped_artists) > 0 or len(current) == initial_count
-            details = (
-                f"Capped {len(capped_artists)} artists at max {limit} tracks: {', '.join(capped_artists[:5])}"
-                if capped_artists else f"All artists were already within max {limit} tracks limit."
-            )
-            results.append(ConstraintResult(
-                name="max_tracks_per_artist",
-                satisfied=True,
-                details=details
-            ))
 
-        # 2. Genre distribution quota
+        # 2. Genre distribution quota using Largest Remainder (Hamilton-Hare method)
         if constraints.genre_distribution:
-            target_genres = {k.lower(): v for k, v in constraints.genre_distribution.items()}
-            # Normalize quotas
-            total_ratio = sum(target_genres.values())
-            normalized_quotas = {k: v / total_ratio for k, v in target_genres.items()}
+            quota_res = allocate_genre_quotas(current, constraints.genre_distribution)
+            if quota_res.selected_tracks:
+                current = quota_res.selected_tracks
+                for t in current:
+                    if t.id in quota_res.selection_reasons:
+                        decisions[t.id].selection_reasons.append(quota_res.selection_reasons[t.id])
+                        decisions[t.id].constraints_applied.append("genre_distribution")
+                for t_id, reason in quota_res.exclusion_reasons.items():
+                    if t_id in decisions and decisions[t_id].selected:
+                        decisions[t_id].selected = False
+                        decisions[t_id].exclusion_reasons.append(reason)
+                        decisions[t_id].constraints_applied.append("genre_distribution")
 
-            genre_buckets: Dict[str, List[Track]] = defaultdict(list)
-            for t in current:
-                genre_buckets[t.primary_genre.lower()].append(t)
-
-            selected_tracks: List[Track] = []
-            target_total = len(current)
-            for g_name, quota in normalized_quotas.items():
-                quota_count = int(round(target_total * quota))
-                matching_tracks = genre_buckets.get(g_name, [])
-                if matching_tracks:
-                    # Sort by popularity
-                    selected_tracks.extend(sorted(matching_tracks, key=lambda t: t.popularity, reverse=True)[:quota_count])
-
-            if selected_tracks:
-                current = selected_tracks
-                results.append(ConstraintResult(
-                    name="genre_distribution",
-                    satisfied=True,
-                    details=f"Applied genre distribution across {len(normalized_quotas)} categories."
-                ))
-            else:
-                results.append(ConstraintResult(
-                    name="genre_distribution",
-                    satisfied=False,
-                    details="Could not satisfy genre distribution: no tracks matched specified genres.",
-                    severity="warning"
-                ))
-
-        # 3. Target playlist duration
+        # 3. Target playlist duration using 0/1 Knapsack optimization
         if constraints.target_duration_minutes is not None:
-            target_ms = constraints.target_duration_minutes * 60 * 1000
-            tol_ms = constraints.duration_tolerance_minutes * 60 * 1000
-
-            fitted_tracks: List[Track] = []
-            accumulated_ms = 0
-
-            # Sort candidate tracks by popularity
-            sorted_candidates = sorted(current, key=lambda t: t.popularity, reverse=True)
-            for t in sorted_candidates:
-                if accumulated_ms + t.duration_ms <= target_ms + tol_ms:
-                    fitted_tracks.append(t)
-                    accumulated_ms += t.duration_ms
-                    if accumulated_ms >= target_ms - tol_ms:
-                        break
-
-            if fitted_tracks:
-                current = fitted_tracks
-                actual_min = accumulated_ms // 60000
-                results.append(ConstraintResult(
-                    name="target_duration",
-                    satisfied=abs(accumulated_ms - target_ms) <= tol_ms,
-                    details=f"Achieved {actual_min} mins (target: {constraints.target_duration_minutes} +/- {constraints.duration_tolerance_minutes} min)."
-                ))
+            dur_res = optimize_playlist_duration(
+                tracks=current,
+                target_minutes=constraints.target_duration_minutes,
+                tolerance_minutes=constraints.duration_tolerance_minutes
+            )
+            if dur_res.selected_tracks:
+                current = dur_res.selected_tracks
+                for t in current:
+                    if t.id in dur_res.selection_reasons:
+                        decisions[t.id].selection_reasons.append(dur_res.selection_reasons[t.id])
+                        decisions[t.id].constraints_applied.append("target_duration")
+                for t in dur_res.excluded_tracks:
+                    if t.id in decisions and decisions[t.id].selected:
+                        decisions[t.id].selected = False
+                        if t.id in dur_res.exclusion_reasons:
+                            decisions[t.id].exclusion_reasons.append(dur_res.exclusion_reasons[t.id])
+                        decisions[t.id].constraints_applied.append("target_duration")
 
         # 4. Sorting & Journey Sequencing
         if constraints.sort_mode:
@@ -157,7 +147,10 @@ class ConstraintSequencingEngine:
             elif sm in ("popularity", "hits", "hits-first"):
                 current.sort(key=lambda t: t.popularity, reverse=True)
             elif sm in ("gems", "gems-first", "underground"):
-                current.sort(key=lambda t: t.popularity, reverse=False)
+                current.sort(key=lambda t: t.popularity)
+
+            for t in current:
+                decisions[t.id].constraints_applied.append(f"sort_mode:{sm}")
 
         # 5. Popularity bias
         if constraints.popularity_bias == "hits":
@@ -166,16 +159,24 @@ class ConstraintSequencingEngine:
             current.sort(key=lambda t: t.popularity)
 
         # 6. Artist spacing (De-clumper)
+        placement_records = []
         if constraints.min_artist_spacing > 0:
-            current, declump_res = declump_tracks(current, min_spacing=constraints.min_artist_spacing)
-            results.append(declump_res)
+            current, _, _, placement_records = declump_tracks(
+                current,
+                min_spacing=constraints.min_artist_spacing,
+                return_details=True
+            )
+            for rec in placement_records:
+                if rec.track_id in decisions:
+                    decisions[rec.track_id].placement_reason = rec.reason
+                    decisions[rec.track_id].constraints_applied.append("artist_spacing")
+                    if rec.constraint_relaxed:
+                        decisions[rec.track_id].constraints_relaxed.append("artist_spacing")
 
         # 7. Pinned positions
         if constraints.pinned_positions:
-            pinned_satisfied = 0
             for pos, track_ident in constraints.pinned_positions.items():
                 idx = pos if pos >= 0 else len(current) + pos
-                # Find track in current
                 target_idx = None
                 for i, t in enumerate(current):
                     if t.id == track_ident or t.uri == track_ident or t.name.lower() == track_ident.lower():
@@ -185,21 +186,50 @@ class ConstraintSequencingEngine:
                 if target_idx is not None and 0 <= idx < len(current):
                     t = current.pop(target_idx)
                     current.insert(idx, t)
-                    pinned_satisfied += 1
+                    decisions[t.id].placement_reason = f"Explicitly pinned to position #{idx + 1}"
+                    decisions[t.id].constraints_applied.append("pinned_positions")
 
-            results.append(ConstraintResult(
-                name="pinned_positions",
-                satisfied=pinned_satisfied == len(constraints.pinned_positions),
-                details=f"Pinned {pinned_satisfied} of {len(constraints.pinned_positions)} specified tracks."
-            ))
+        # Assign final 1-based positions for all selected tracks
+        for idx, t in enumerate(current, 1):
+            if t.id in decisions:
+                decisions[t.id].position = idx
+                if not decisions[t.id].placement_reason:
+                    decisions[t.id].placement_reason = f"Ordered at position #{idx} via journey flow"
 
-        diff_summary = f"Curated {len(current)} tracks from initial {initial_count} tracks."
+        # 8. CENTRAL INDEPENDENT VALIDATION
+        # Run PlaylistValidator on the actual finished tracks
+        validation_report = PlaylistValidator.validate_playlist(
+            original_tracks=tracks,
+            final_tracks=current,
+            min_artist_spacing=constraints.min_artist_spacing,
+            max_tracks_per_artist=constraints.max_tracks_per_artist,
+            target_duration_minutes=constraints.target_duration_minutes,
+            duration_tolerance_minutes=constraints.duration_tolerance_minutes,
+            genre_distribution=constraints.genre_distribution,
+            pinned_positions=constraints.pinned_positions
+        )
+
+        diff_summary = f"Curated {len(current)} tracks from initial pool of {initial_count} tracks."
+        total_duration_ms = sum(t.duration_ms for t in current)
+
+        # 9. Compile CurationExplanation
+        explanation = CurationExplanation(
+            playlist_name=playlist_name,
+            source_track_count=initial_count,
+            final_track_count=len(current),
+            duration_achieved_ms=total_duration_ms,
+            duration_target_minutes=constraints.target_duration_minutes,
+            constraint_audits=validation_report.results,
+            track_decisions=list(decisions.values()),
+            diff_summary=diff_summary
+        )
 
         return CurationPlan(
             playlist_name=playlist_name,
             tracks=current,
             initial_track_count=initial_count,
             final_track_count=len(current),
-            constraints_evaluated=results,
-            diff_summary=diff_summary
+            constraints_evaluated=validation_report.results,
+            diff_summary=diff_summary,
+            explanation=explanation
         )
