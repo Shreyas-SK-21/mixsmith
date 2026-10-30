@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
 
 from mixsmith.core.models import Track
 from mixsmith.utils.logging import get_logger
@@ -14,23 +15,23 @@ logger = get_logger("mixsmith.duration")
 @dataclass
 class DurationOptimizationResult:
     """Outcome of playlist duration optimization."""
-    selected_tracks: List[Track]
-    excluded_tracks: List[Track]
+    selected_tracks: list[Track]
+    excluded_tracks: list[Track]
     total_duration_ms: int
     target_duration_ms: int
     tolerance_ms: int
     delta_ms: int
     is_within_tolerance: bool
-    selection_reasons: Dict[str, str] = field(default_factory=dict)
-    exclusion_reasons: Dict[str, str] = field(default_factory=dict)
+    selection_reasons: dict[str, str] = field(default_factory=dict)
+    exclusion_reasons: dict[str, str] = field(default_factory=dict)
 
 
 def optimize_playlist_duration(
-    tracks: List[Track],
-    target_minutes: Optional[int] = None,
+    tracks: list[Track],
+    target_minutes: int | None = None,
     tolerance_minutes: int = 10,
     time_unit_seconds: int = 5,
-    target_duration_minutes: Optional[int] = None
+    target_duration_minutes: int | None = None
 ) -> DurationOptimizationResult:
     """
     Selects a subset of tracks to match target duration within [target - tol, target + tol],
@@ -38,11 +39,20 @@ def optimize_playlist_duration(
       1. Proximity to target duration.
       2. Artist diversity (penalizing redundant tracks from the same artist).
       3. Track quality/popularity.
-    
-    Uses scaled discrete dynamic programming (0/1 Knapsack) for datasets <= 250 tracks,
-    and a bounded approximation heuristic for larger libraries.
+
+    Guarantees:
+      - Validates argument types and ranges.
+      - Never allows time discretisation to exceed the actual runtime ceiling (verified in ms).
+      - Actively compares candidate combinations and optimizes artist diversity.
     """
-    effective_minutes = target_duration_minutes if target_duration_minutes is not None else (target_minutes or 60)
+    effective_minutes = target_duration_minutes if target_duration_minutes is not None else target_minutes
+    if effective_minutes is None or effective_minutes <= 0:
+        raise ValueError(f"target_minutes must be a positive integer, got {effective_minutes}")
+    if tolerance_minutes < 0:
+        raise ValueError(f"tolerance_minutes cannot be negative, got {tolerance_minutes}")
+    if time_unit_seconds <= 0:
+        raise ValueError(f"time_unit_seconds must be a positive integer, got {time_unit_seconds}")
+
     target_ms = effective_minutes * 60 * 1000
     tol_ms = tolerance_minutes * 60 * 1000
     min_acceptable_ms = max(0, target_ms - tol_ms)
@@ -76,104 +86,119 @@ def optimize_playlist_duration(
 
     # Coarse time discretization for DP capacity
     unit_ms = time_unit_seconds * 1000
-    target_units = target_ms // unit_ms
     max_units = max_acceptable_ms // unit_ms
 
-    # If track count is reasonable (<= 300), use bounded multi-objective Knapsack DP
-    if len(tracks) <= 300:
+    # If track count <= 250, use bounded multi-objective Knapsack DP
+    if len(tracks) <= 250:
         return _knapsack_dp_duration(
             tracks=tracks,
             target_ms=target_ms,
             tol_ms=tol_ms,
             unit_ms=unit_ms,
-            max_units=max_units
+            max_units=max_units,
+            max_acceptable_ms=max_acceptable_ms
         )
     else:
-        return _greedy_diversity_duration(
+        return _diversity_aware_large_duration(
             tracks=tracks,
             target_ms=target_ms,
-            tol_ms=tol_ms
+            tol_ms=tol_ms,
+            unit_ms=unit_ms,
+            max_acceptable_ms=max_acceptable_ms
         )
 
 
 def _knapsack_dp_duration(
-    tracks: List[Track],
+    tracks: list[Track],
     target_ms: int,
     tol_ms: int,
     unit_ms: int,
-    max_units: int
+    max_units: int,
+    max_acceptable_ms: int
 ) -> DurationOptimizationResult:
-    """0/1 Knapsack dynamic programming with diversity and popularity weighting."""
-    n = len(tracks)
-    # Weight per track in discrete units (at least 1)
-    weights = [max(1, t.duration_ms // unit_ms) for t in tracks]
-
-    # Value function: base popularity score (50-100)
+    """
+    0/1 Knapsack dynamic programming tracking actual milliseconds in state
+    to prevent discretisation ceiling overrun.
+    """
+    # Scaled discrete weights (at least 1)
+    weights = [max(1, math.ceil(t.duration_ms / unit_ms)) for t in tracks]
     values = [max(10, t.popularity) for t in tracks]
 
-    # dp[w] = (max_val, list_of_indices)
-    # We use a memory-efficient sparse table / dict
-    dp: Dict[int, Tuple[float, List[int]]] = {0: (0.0, [])}
+    # dp[w] = (max_val, list_of_indices, actual_total_ms)
+    dp: dict[int, tuple[float, list[int], int]] = {0: (0.0, [], 0)}
 
     for idx, (w, val, track) in enumerate(zip(weights, values, tracks)):
-        # Decreasing update to enforce 0/1 constraint
         current_entries = list(dp.items())
-        for prev_w, (prev_val, prev_indices) in current_entries:
+        t_dur = track.duration_ms
+        primary_artist = (track.primary_artist or "Unknown").lower()
+
+        for prev_w, (prev_val, prev_indices, prev_ms) in current_entries:
             new_w = prev_w + w
-            if new_w <= max_units:
-                # Count prior tracks by this artist in prev_indices for diversity penalty
-                artist_occurrences = sum(1 for i in prev_indices if tracks[i].primary_artist == track.primary_artist)
-                diversity_multiplier = 1.0 / (1.0 + 0.35 * artist_occurrences)
+            new_ms = prev_ms + t_dur
+
+            # Strict millisecond verification: NEVER exceed max_acceptable_ms
+            if new_w <= max_units and new_ms <= max_acceptable_ms:
+                artist_occurrences = sum(
+                    1 for i in prev_indices if (tracks[i].primary_artist or "Unknown").lower() == primary_artist
+                )
+                diversity_multiplier = 1.0 / (1.0 + 0.40 * artist_occurrences)
                 new_val = prev_val + (val * diversity_multiplier)
 
                 if new_w not in dp or new_val > dp[new_w][0]:
-                    dp[new_w] = (new_val, prev_indices + [idx])
+                    dp[new_w] = (new_val, prev_indices + [idx], new_ms)
 
     # Find the best capacity near target_ms
-    target_units = target_ms // unit_ms
-    best_indices: List[int] = []
+    min_acceptable_ms = max(0, target_ms - tol_ms)
+    best_indices: list[int] = []
     best_score = -float("inf")
-    best_w = 0
 
-    min_acceptable_units = max(0, (target_ms - tol_ms) // unit_ms)
-
-    for w, (val, indices) in dp.items():
-        # Score considers value + proximity penalty to exact target
-        distance_penalty = abs(w - target_units) * 8.0
-        score = val - distance_penalty
-        if w >= min_acceptable_units and score > best_score:
+    for _w, (dp_val, indices, actual_ms) in dp.items():
+        if actual_ms > max_acceptable_ms:
+            continue
+        # Distance penalty calculated in actual seconds, strongly penalizing drift from target
+        distance_penalty = (abs(actual_ms - target_ms) / 1000.0) * 1.5
+        score = dp_val - distance_penalty
+        if actual_ms >= min_acceptable_ms and score > best_score:
             best_score = score
             best_indices = indices
-            best_w = w
 
-    # Fallback to closest weight if min_acceptable was not reached
+    # Fallback to closest millisecond state if min_acceptable was not reached
     if not best_indices and dp:
-        closest_w = min(dp.keys(), key=lambda w: abs(w - target_units))
-        best_indices = dp[closest_w][1]
+        valid_entries = [item for item in dp.values() if item[2] <= max_acceptable_ms]
+        if valid_entries:
+            best_item = min(valid_entries, key=lambda item: abs(item[2] - target_ms))
+            best_indices = best_item[1]
 
-    selected_set = set(best_indices)
+    # Verify actual millisecond total
     selected_tracks = [tracks[i] for i in best_indices]
-    excluded_tracks = [tracks[i] for i in range(n) if i not in selected_set]
+    actual_total_ms = sum(t.duration_ms for t in selected_tracks)
 
-    total_dur = sum(t.duration_ms for t in selected_tracks)
-    delta_ms = total_dur - target_ms
-    within_tol = abs(delta_ms) <= tol_ms
+    # Guard against any edge-case discretisation overshoot
+    while selected_tracks and actual_total_ms > max_acceptable_ms:
+        # Drop the track with least value/popularity to respect ceiling
+        worst_track = min(selected_tracks, key=lambda t: t.popularity)
+        selected_tracks.remove(worst_track)
+        actual_total_ms = sum(t.duration_ms for t in selected_tracks)
 
-    sel_reasons = {}
-    for t in selected_tracks:
-        sel_reasons[t.id] = f"Selected by 0/1 Knapsack optimizer (duration {t.duration_formatted}, popularity {t.popularity})"
+    selected_set = {id(t) for t in selected_tracks}
+    excluded_tracks = [t for t in tracks if id(t) not in selected_set]
 
-    ex_reasons = {}
-    for t in excluded_tracks:
-        ex_reasons[t.id] = (
-            f"Excluded: Track duration ({t.duration_formatted}) did not fit in optimal {target_ms // 60000}-minute "
-            f"knapsack combination or was deprioritized for artist diversity."
-        )
+    delta_ms = actual_total_ms - target_ms
+    within_tol = abs(delta_ms) <= tol_ms and actual_total_ms <= max_acceptable_ms
+
+    sel_reasons = {
+        t.id: f"Selected by 0/1 Knapsack optimizer (duration {t.duration_formatted}, popularity {t.popularity})"
+        for t in selected_tracks
+    }
+    ex_reasons = {
+        t.id: f"Excluded: Track duration ({t.duration_formatted}) did not fit in optimal knapsack combination."
+        for t in excluded_tracks
+    }
 
     return DurationOptimizationResult(
         selected_tracks=selected_tracks,
         excluded_tracks=excluded_tracks,
-        total_duration_ms=total_dur,
+        total_duration_ms=actual_total_ms,
         target_duration_ms=target_ms,
         tolerance_ms=tol_ms,
         delta_ms=delta_ms,
@@ -183,56 +208,60 @@ def _knapsack_dp_duration(
     )
 
 
-def _greedy_diversity_duration(
-    tracks: List[Track],
+def _diversity_aware_large_duration(
+    tracks: list[Track],
     target_ms: int,
-    tol_ms: int
+    tol_ms: int,
+    unit_ms: int,
+    max_acceptable_ms: int
 ) -> DurationOptimizationResult:
-    """Scalable greedy duration optimizer with artist diversity weighting for large libraries."""
-    max_ms = target_ms + tol_ms
-    min_ms = max(0, target_ms - tol_ms)
+    """
+    Scalable multi-combination optimizer for large libraries.
+    Ranks tracks by diversity-penalized score, compares multiple candidate combinations,
+    and runs sub-knapsack optimization on the top candidate pool.
+    """
+    # 1. Calculate overall artist frequencies in input library
+    artist_freq = Counter((t.primary_artist or "Unknown").lower() for t in tracks)
 
-    # Sort with diversity-aware rank
-    artist_seen: Dict[str, int] = {}
-    selected: List[Track] = []
-    excluded: List[Track] = []
-    accumulated_ms = 0
+    # 2. Score tracks with diversity bonus (fewer tracks by same artist = higher priority)
+    scored_candidates = []
+    for t in tracks:
+        a = (t.primary_artist or "Unknown").lower()
+        # Diversity score: rewards moderate popularity and penalizes artist saturation
+        div_score = (t.popularity + 20) / math.sqrt(artist_freq[a])
+        scored_candidates.append((div_score, t))
 
-    sel_reasons = {}
-    ex_reasons = {}
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
 
-    # Sort tracks by popularity initially
-    candidates = sorted(tracks, key=lambda t: t.popularity, reverse=True)
+    # Filter to top 150 diverse candidate tracks and run knapsack DP
+    top_candidates = [item[1] for item in scored_candidates[:150]]
+    max_units = max_acceptable_ms // unit_ms
 
-    for t in candidates:
-        if accumulated_ms + t.duration_ms <= max_ms:
-            selected.append(t)
-            accumulated_ms += t.duration_ms
-            artist_seen[t.primary_artist] = artist_seen.get(t.primary_artist, 0) + 1
-            sel_reasons[t.id] = f"Selected within runtime budget ({t.duration_formatted})"
-            if accumulated_ms >= target_ms:
-                # Target satisfied
-                break
-        else:
-            excluded.append(t)
-            ex_reasons[t.id] = f"Excluded: Adding track ({t.duration_formatted}) exceeds max allowable duration."
+    dp_result = _knapsack_dp_duration(
+        tracks=top_candidates,
+        target_ms=target_ms,
+        tol_ms=tol_ms,
+        unit_ms=unit_ms,
+        max_units=max_units,
+        max_acceptable_ms=max_acceptable_ms
+    )
 
-    for t in candidates:
-        if t not in selected and t not in excluded:
-            excluded.append(t)
-            ex_reasons[t.id] = "Excluded: Runtime budget reached."
-
-    delta_ms = accumulated_ms - target_ms
-    within = min_ms <= accumulated_ms <= max_ms
+    # Build full exclusion map including tracks outside the top 150
+    selected_set = {id(t) for t in dp_result.selected_tracks}
+    all_excluded = [t for t in tracks if id(t) not in selected_set]
+    all_ex_reasons = dict(dp_result.exclusion_reasons)
+    for t in all_excluded:
+        if t.id not in all_ex_reasons:
+            all_ex_reasons[t.id] = "Excluded: Deprioritized for artist diversity in large library selection."
 
     return DurationOptimizationResult(
-        selected_tracks=selected,
-        excluded_tracks=excluded,
-        total_duration_ms=accumulated_ms,
+        selected_tracks=dp_result.selected_tracks,
+        excluded_tracks=all_excluded,
+        total_duration_ms=dp_result.total_duration_ms,
         target_duration_ms=target_ms,
         tolerance_ms=tol_ms,
-        delta_ms=delta_ms,
-        is_within_tolerance=within,
-        selection_reasons=sel_reasons,
-        exclusion_reasons=ex_reasons
+        delta_ms=dp_result.delta_ms,
+        is_within_tolerance=dp_result.is_within_tolerance,
+        selection_reasons=dp_result.selection_reasons,
+        exclusion_reasons=all_ex_reasons
     )

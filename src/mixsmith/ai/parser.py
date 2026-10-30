@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-import json
-import os
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from abc import ABC, abstractmethod
 
 from mixsmith.ai.schema import (
     Ambiguity,
-    ConstraintConflict,
     CurationSpecification,
-    HardConstraints,
     NaturalLanguageCurationSpec,
-    Preferences,
-    SoftConstraints,
 )
+from mixsmith.core.exceptions import FilterMatchError
 from mixsmith.core.filters import filter_tracks
 from mixsmith.core.models import CurationPlan, Track
 from mixsmith.core.quotas import allocate_genre_quotas
@@ -32,7 +26,6 @@ class LLMProviderBase(ABC):
     @abstractmethod
     def parse_instruction(self, prompt: str) -> CurationSpecification:
         """Parses natural language prompt into structured CurationSpecification."""
-        pass
 
 
 class OfflineHeuristicProvider(LLMProviderBase):
@@ -168,25 +161,36 @@ def parse_natural_language_to_spec(prompt: str) -> CurationSpecification:
                 if not any(k in cand_clean.lower() for k in ["repeat", "track", "hour", "minute", "drive", "energy"]):
                     hard.must_include_artists.append(cand_clean.title())
 
-    # 9. Preferences: Journey, Popularity, Energy
+    # 9. Preferences: Journey, Popularity, Energy (Distinct from Popularity)
     if "hidden gems" in p or "deep cuts" in p or "underground" in p:
         prefs.popularity_preference = "hidden_gems"
+        prefs.sort_journey = "gems"
     elif "superstar hits" in p or "hits first" in p or "popular" in p:
         prefs.popularity_preference = "hits"
+        prefs.sort_journey = "popularity"
 
-    if "mellow to energetic" in p or "energy" in p or "gradual" in p or "start mellow" in p:
+    # Distinct energy preference: Popularity is NOT musical energy
+    if "mellow to energetic" in p or "gradual energy" in p or re.search(r"\bstarts?\s+mellow\b", p) or ("mellow" in p and "energy" in p) or "builds energy" in p or "build energy" in p:
         prefs.tempo_energy_preference = "mellow_to_energetic"
-        prefs.sort_journey = "gems"
+        # Preserve artist spacing journey rather than conflating energy with popularity
+        if not prefs.sort_journey:
+            prefs.sort_journey = "declump"
+        spec.ambiguities.append(Ambiguity(
+            parameter="tempo_energy",
+            query=prompt,
+            default_interpretation="Energy progression requested; artist spacing preserved without conflating popularity with acoustic energy."
+        ))
     elif "energetic to mellow" in p or "wind down" in p:
         prefs.tempo_energy_preference = "energetic_to_mellow"
-        prefs.sort_journey = "declump"
+        if not prefs.sort_journey:
+            prefs.sort_journey = "declump"
     elif "chronological" in p or "time travel" in p or "oldest" in p:
         prefs.sort_journey = "chronological"
     elif "decade" in p or "era" in p:
         prefs.sort_journey = "decade"
     elif "genre" in p:
         prefs.sort_journey = "genre"
-    else:
+    elif not prefs.sort_journey:
         prefs.sort_journey = "declump"
 
     # 10. Ambiguity Detection
@@ -223,10 +227,10 @@ def parse_natural_language_heuristics(prompt: str) -> NaturalLanguageCurationSpe
 
 
 def execute_natural_language_curation(
-    tracks: List[Track],
+    tracks: list[Track],
     prompt: str,
-    spec_override: Optional[Union[CurationSpecification, NaturalLanguageCurationSpec]] = None
-) -> Tuple[CurationPlan, CurationSpecification]:
+    spec_override: CurationSpecification | NaturalLanguageCurationSpec | None = None
+) -> tuple[CurationPlan, CurationSpecification]:
     """
     Accepts natural-language instructions, parses them into structured constraints,
     and executes deterministic filtering, knapsack duration, and sequencing.
@@ -276,8 +280,14 @@ def execute_natural_language_curation(
         filtered = [t for t in filtered if not any(g.lower() in ex_genres_lower for g in t.all_genres)]
 
     if not filtered:
-        logger.warning("Combined filter matched 0 tracks; relaxing to source tracks for sequencing.")
-        filtered = list(tracks)
+        msg = (
+            f"Curation filter matched 0 tracks from input library of {len(tracks)} tracks. "
+            f"Active filters: artists={hard.must_include_artists}, "
+            f"genres={hard.must_include_genres}, decades={hard.must_include_decades}, "
+            f"clean_only={hard.clean_only}, explicit_only={hard.explicit_only}."
+        )
+        logger.error(msg)
+        raise FilterMatchError(msg)
 
     # 2. Genre Quota Allocation (if soft constraints specify desired genre ratios)
     if soft.desired_genres:

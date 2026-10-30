@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
 
-from mixsmith.core.declumper import analyze_spacing_feasibility, declump_tracks
+from mixsmith.core.declumper import PlacementDecision, declump_tracks
 from mixsmith.core.duration import optimize_playlist_duration
 from mixsmith.core.explanation import CurationExplanation, TrackCurationDecision
 from mixsmith.core.journeys import (
@@ -15,7 +14,7 @@ from mixsmith.core.journeys import (
     sequence_genre_journey,
     sequence_nostalgia_mode,
 )
-from mixsmith.core.models import ConstraintResult, CurationPlan, Track
+from mixsmith.core.models import CurationPlan, Track
 from mixsmith.core.quotas import allocate_genre_quotas
 from mixsmith.core.validation import PlaylistValidator
 from mixsmith.utils.logging import get_logger
@@ -27,14 +26,14 @@ logger = get_logger("mixsmith.sequencing")
 class CurationConstraints:
     """Specification of all constraints for curating and sequencing a playlist."""
     min_artist_spacing: int = 1
-    max_tracks_per_artist: Optional[int] = None
-    target_duration_minutes: Optional[int] = None
+    max_tracks_per_artist: int | None = None
+    target_duration_minutes: int | None = None
     duration_tolerance_minutes: int = 10
-    genre_distribution: Optional[Dict[str, float]] = None
-    decade_distribution: Optional[Dict[str, float]] = None
-    pinned_positions: Optional[Dict[int, str]] = None  # index -> track_id / uri
-    popularity_bias: Optional[str] = None  # "hits", "gems", "balanced"
-    sort_mode: Optional[str] = None  # "declump", "chronological", "decade", "genre", "nostalgia"
+    genre_distribution: dict[str, float] | None = None
+    decade_distribution: dict[str, float] | None = None
+    pinned_positions: dict[int, str] | None = None  # index -> track_id / uri
+    popularity_bias: str | None = None  # "hits", "gems", "balanced"
+    sort_mode: str | None = None  # "declump", "chronological", "decade", "genre", "nostalgia"
     preserve_order: bool = False
 
 
@@ -43,8 +42,8 @@ class ConstraintSequencingEngine:
 
     def curate(
         self,
-        tracks: List[Track],
-        constraints: Optional[CurationConstraints] = None,
+        tracks: list[Track],
+        constraints: CurationConstraints | None = None,
         playlist_name: str = "Curated Playlist"
     ) -> CurationPlan:
         """Executes multi-constraint curation, independent validation, and compiles a CurationExplanation."""
@@ -53,7 +52,7 @@ class ConstraintSequencingEngine:
         current = list(tracks)
 
         # Decision tracking dictionary for explainability: track_id -> TrackCurationDecision
-        decisions: Dict[str, TrackCurationDecision] = {
+        decisions: dict[str, TrackCurationDecision] = {
             t.id: TrackCurationDecision(
                 track_id=t.id,
                 track_name=t.name,
@@ -68,12 +67,12 @@ class ConstraintSequencingEngine:
         # 1. Enforce max tracks per artist
         if constraints.max_tracks_per_artist is not None and constraints.max_tracks_per_artist > 0:
             limit = constraints.max_tracks_per_artist
-            artist_buckets: Dict[str, List[Track]] = defaultdict(list)
+            artist_buckets: dict[str, list[Track]] = defaultdict(list)
             for t in current:
                 a_key = t.primary_artist.lower().strip() if t.primary_artist else "unknown"
                 artist_buckets[a_key].append(t)
 
-            pruned: List[Track] = []
+            pruned: list[Track] = []
             for a_key, a_tracks in artist_buckets.items():
                 if len(a_tracks) > limit:
                     # Keep tracks with highest popularity
@@ -159,7 +158,7 @@ class ConstraintSequencingEngine:
             current.sort(key=lambda t: t.popularity)
 
         # 6. Artist spacing (De-clumper)
-        placement_records = []
+        placement_records: list[PlacementDecision] = []
         if constraints.min_artist_spacing > 0:
             current, _, _, placement_records = declump_tracks(
                 current,

@@ -4,20 +4,17 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
-import os
 import sys
 
 # Safe UTF-8 encoding on Windows consoles
 if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        getattr(sys.stdout, "reconfigure")(encoding="utf-8", errors="replace")
+        getattr(sys.stderr, "reconfigure")(encoding="utf-8", errors="replace")
     except Exception:
         pass
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 from mixsmith.ai.parser import execute_natural_language_curation
 from mixsmith.auth.manager import OAuthManager
@@ -26,25 +23,22 @@ from mixsmith.core.dedup import deduplicate_tracks, find_duplicates
 from mixsmith.core.filters import filter_tracks
 from mixsmith.core.manager import (
     compare_playlists,
-    save_playlist_snapshot,
-    split_by_decade,
-    split_by_genre,
 )
 from mixsmith.core.models import Playlist, Track
 from mixsmith.core.sequencing import ConstraintSequencingEngine, CurationConstraints
 from mixsmith.exporters.csv import export_tracks_to_csv
 from mixsmith.exporters.excel import export_tracks_to_excel
-from mixsmith.utils.config import AppConfig, get_default_config_dir
+from mixsmith.utils.config import AppConfig
 from mixsmith.utils.logging import get_logger
 
 logger = get_logger("mixsmith.cli")
 
 
 def load_tracks_from_source(
-    connector: Optional[SpotifyConnector],
-    file_input: Optional[str],
-    playlist_input: Optional[str]
-) -> Tuple[List[Track], str]:
+    connector: SpotifyConnector | None,
+    file_input: str | None,
+    playlist_input: str | None
+) -> tuple[list[Track], str]:
     """Loads tracks from an Excel file, CSV file, or live Spotify playlist."""
     if file_input:
         path = Path(file_input).resolve()
@@ -52,7 +46,7 @@ def load_tracks_from_source(
             print(f"[ERROR] Source file not found: {path}", file=sys.stderr)
             sys.exit(1)
 
-        tracks: List[Track] = []
+        tracks: list[Track] = []
         if path.suffix.lower() == ".csv":
             with open(path, "r", encoding="utf-8-sig") as f:
                 reader = csv.DictReader(f)
@@ -251,6 +245,13 @@ def handle_curate(args):
         print("\n[DRY RUN] No modifications were made to Spotify.")
         return
 
+    # Hard constraint safety guard: prevent playlist creation if hard constraints failed
+    hard_failures = [c for c in plan.constraints_evaluated if not c.satisfied and c.severity == "error"]
+    if hard_failures and not getattr(args, "force", False):
+        print(f"\n[ERROR] Playlist creation blocked: {len(hard_failures)} hard constraint(s) failed ({', '.join(c.name for c in hard_failures)}).")
+        print("Review the preview above, adjust your constraints, or pass --force to override.")
+        return
+
     # Check for confirmation
     if not args.confirm:
         resp = input(f"\nCreate Spotify playlist '{plan.playlist_name}' with {len(plan.tracks)} tracks? [y/N]: ").strip().lower()
@@ -266,7 +267,7 @@ def handle_curate(args):
         public=args.public,
         tracks=plan.tracks
     )
-    print(f"\n[SUCCESS] Playlist created on Spotify!")
+    print("\n[SUCCESS] Playlist created on Spotify!")
     print(f"URL: {created.url}")
 
 
@@ -308,7 +309,7 @@ def handle_compare(args):
     p2 = Playlist(id="p2", name=name2, tracks=t2)
 
     diff = compare_playlists(p1, p2)
-    print(f"\n=== Playlist Overlap Analysis ===")
+    print("\n=== Playlist Overlap Analysis ===")
     print(f"Playlist A: {name1} ({len(t1)} tracks)")
     print(f"Playlist B: {name2} ({len(t2)} tracks)")
     print(f"Common Tracks: {diff['common_count']}")
@@ -377,6 +378,7 @@ def main():
     p_curate.add_argument("--dry-run", action="store_true", help="Preview plan without creating on Spotify")
     p_curate.add_argument("--confirm", action="store_true", help="Auto-confirm Spotify creation")
     p_curate.add_argument("--public", action="store_true", help="Make playlist public")
+    p_curate.add_argument("--force", action="store_true", help="Force playlist creation even if hard constraints failed")
     p_curate.add_argument("--explain", action="store_true", help="Display comprehensive curation explanation report")
     p_curate.add_argument("--explain-format", choices=["markdown", "json"], default="markdown", help="Format for explanation report")
     p_curate.add_argument("--explain-output", help="Save explanation report to file (e.g. report.md)")

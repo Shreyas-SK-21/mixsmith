@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -12,7 +11,7 @@ class ConstraintConflict:
     """Represents a direct conflict between requested constraints."""
     conflict_type: str
     description: str
-    conflicting_parameters: List[str]
+    conflicting_parameters: list[str]
     suggested_resolution: str
 
 
@@ -27,15 +26,15 @@ class Ambiguity:
 @dataclass
 class HardConstraints:
     """Non-negotiable requirements that must be strictly satisfied."""
-    must_include_artists: List[str] = field(default_factory=list)
-    must_exclude_artists: List[str] = field(default_factory=list)
-    must_include_genres: List[str] = field(default_factory=list)
-    must_exclude_genres: List[str] = field(default_factory=list)
-    must_include_decades: List[str] = field(default_factory=list)
+    must_include_artists: list[str] = field(default_factory=list)
+    must_exclude_artists: list[str] = field(default_factory=list)
+    must_include_genres: list[str] = field(default_factory=list)
+    must_exclude_genres: list[str] = field(default_factory=list)
+    must_include_decades: list[str] = field(default_factory=list)
     min_artist_spacing: int = 1
-    max_tracks_per_artist: Optional[int] = None
-    min_duration_minutes: Optional[int] = None
-    max_duration_minutes: Optional[int] = None
+    max_tracks_per_artist: int | None = None
+    min_duration_minutes: int | None = None
+    max_duration_minutes: int | None = None
     clean_only: bool = False
     explicit_only: bool = False
 
@@ -43,20 +42,20 @@ class HardConstraints:
 @dataclass
 class SoftConstraints:
     """Optimization goals to satisfy as closely as possible without failing."""
-    desired_genres: Dict[str, float] = field(default_factory=dict)
-    desired_decades: Dict[str, float] = field(default_factory=dict)
-    desired_themes: List[str] = field(default_factory=list)
-    target_duration_minutes: Optional[int] = None
+    desired_genres: dict[str, float] = field(default_factory=dict)
+    desired_decades: dict[str, float] = field(default_factory=dict)
+    desired_themes: list[str] = field(default_factory=list)
+    target_duration_minutes: int | None = None
     duration_tolerance_minutes: int = 10
 
 
 @dataclass
 class Preferences:
     """Subjective ranking signals and listening journey styles."""
-    popularity_preference: Optional[str] = None  # "hidden_gems", "hits", "balanced"
-    tempo_energy_preference: Optional[str] = None  # "mellow_to_energetic", "energetic_to_mellow", "steady"
-    sort_journey: Optional[str] = "declump"  # "declump", "chronological", "decade", "genre", "nostalgia"
-    nostalgia_anchor_decade: Optional[str] = None
+    popularity_preference: str | None = None  # "hidden_gems", "hits", "balanced"
+    tempo_energy_preference: str | None = None  # "mellow_to_energetic", "energetic_to_mellow", "steady"
+    sort_journey: str | None = "declump"  # "declump", "chronological", "decade", "genre", "nostalgia"
+    nostalgia_anchor_decade: str | None = None
 
 
 @dataclass
@@ -67,12 +66,12 @@ class CurationSpecification:
     hard_constraints: HardConstraints = field(default_factory=HardConstraints)
     soft_constraints: SoftConstraints = field(default_factory=SoftConstraints)
     preferences: Preferences = field(default_factory=Preferences)
-    conflicts: List[ConstraintConflict] = field(default_factory=list)
-    ambiguities: List[Ambiguity] = field(default_factory=list)
+    conflicts: list[ConstraintConflict] = field(default_factory=list)
+    ambiguities: list[Ambiguity] = field(default_factory=list)
 
-    def validate_conflicts(self) -> List[ConstraintConflict]:
+    def validate_conflicts(self) -> list[ConstraintConflict]:
         """Detects contradictions between constraints before executing algorithms."""
-        found_conflicts: List[ConstraintConflict] = []
+        found_conflicts: list[ConstraintConflict] = []
 
         # 1. Clean only vs Explicit only
         if self.hard_constraints.clean_only and self.hard_constraints.explicit_only:
@@ -139,11 +138,11 @@ class CurationSpecification:
             explicit_only=self.hard_constraints.explicit_only,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def get_json_schema(cls) -> Dict[str, Any]:
+    def get_json_schema(cls) -> dict[str, Any]:
         """Returns JSON schema for LLM tool calling and structured output."""
         return {
             "type": "object",
@@ -189,23 +188,23 @@ class NaturalLanguageCurationSpec:
     """Backward compatibility wrapper preserving flat spec accessors."""
     name: str = "Curated Mix"
     description: str = ""
-    target_duration_minutes: Optional[int] = None
-    artists_included: List[str] = field(default_factory=list)
-    artists_excluded: List[str] = field(default_factory=list)
-    genres_included: List[str] = field(default_factory=list)
-    decades_included: List[str] = field(default_factory=list)
-    themes_included: List[str] = field(default_factory=list)
+    target_duration_minutes: int | None = None
+    artists_included: list[str] = field(default_factory=list)
+    artists_excluded: list[str] = field(default_factory=list)
+    genres_included: list[str] = field(default_factory=list)
+    decades_included: list[str] = field(default_factory=list)
+    themes_included: list[str] = field(default_factory=list)
     min_artist_spacing: int = 1
-    max_tracks_per_artist: Optional[int] = None
-    sort_mode: Optional[str] = "declump"
+    max_tracks_per_artist: int | None = None
+    sort_mode: str | None = "declump"
     clean_only: bool = False
     explicit_only: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> NaturalLanguageCurationSpec:
+    def from_dict(cls, data: dict[str, Any]) -> NaturalLanguageCurationSpec:
         return cls(
             name=data.get("name") or "Curated Mix",
             description=data.get("description") or "",
@@ -252,7 +251,7 @@ class NaturalLanguageCurationSpec:
         return spec
 
     @classmethod
-    def get_json_schema(cls) -> Dict[str, Any]:
+    def get_json_schema(cls) -> dict[str, Any]:
         """Returns JSON schema for flat spec structured output or tool definitions."""
         return {
             "type": "object",

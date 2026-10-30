@@ -3,29 +3,24 @@
 
 class MixsmithError(Exception):
     """Base exception for all Mixsmith errors."""
-    pass
 
 
 # --- Authentication & Credentials ---
 
 class AuthError(MixsmithError):
     """Base exception for authentication failures."""
-    pass
 
 
 class CredentialsNotFoundError(AuthError):
     """Raised when Spotify API credentials cannot be found."""
-    pass
 
 
 class TokenExpiredError(AuthError):
     """Raised when an OAuth access token has expired and refresh failed."""
-    pass
 
 
 class AuthorizationDeniedError(AuthError):
     """Raised when the user denies OAuth access or authentication is cancelled."""
-    pass
 
 
 # --- API & Network ---
@@ -55,12 +50,11 @@ class ResourceNotFoundError(APIError):
 
 class CurationError(MixsmithError):
     """Base exception for curation, filtering, or sequencing failures."""
-    pass
 
 
 class InfeasibleConstraintError(CurationError):
     """Raised when playlist constraints are mathematically impossible to satisfy."""
-    def __init__(self, message: str, constraint: str, details: dict = None):
+    def __init__(self, message: str, constraint: str, details: dict | None = None):
         super().__init__(message)
         self.constraint = constraint
         self.details = details or {}
@@ -68,21 +62,21 @@ class InfeasibleConstraintError(CurationError):
 
 class FilterSyntaxError(CurationError):
     """Raised when a custom filter expression contains invalid syntax."""
-    pass
+
+
+class FilterMatchError(CurationError):
+    """Raised when requested filters match zero tracks in the source library."""
 
 
 class PlaylistMutationError(CurationError):
     """Raised when safe playlist mutation safeguards are violated or fail."""
-    pass
 
 
 class SnapshotDriftError(PlaylistMutationError):
     """Raised when the target playlist's snapshot ID changed unexpectedly during mutation."""
-    pass
 
 
 # --- Exporters ---
 
 class ExportError(MixsmithError):
     """Raised when exporting to Excel, CSV, or other formats fails."""
-    pass

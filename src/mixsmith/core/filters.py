@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
 from mixsmith.core.exceptions import FilterSyntaxError
 from mixsmith.core.models import Track
@@ -24,7 +24,7 @@ def evaluate_filter_expression(track: Track, expression: str) -> bool:
         return True
 
     # Build evaluation context
-    var_map: Dict[str, Any] = {
+    var_map: dict[str, Any] = {
         "name": track.name.lower(),
         "artist": (track.primary_artist or "").lower(),
         "artists": [a.lower() for a in track.artists],
@@ -66,21 +66,7 @@ def evaluate_filter_expression(track: Track, expression: str) -> bool:
                 left = eval_node(node.left)
                 for op, comparator in zip(node.ops, node.comparators):
                     right = eval_node(comparator)
-                    if isinstance(op, ast.Eq) and not (left == right):
-                        return False
-                    elif isinstance(op, ast.NotEq) and not (left != right):
-                        return False
-                    elif isinstance(op, ast.Lt) and not (left < right):
-                        return False
-                    elif isinstance(op, ast.LtE) and not (left <= right):
-                        return False
-                    elif isinstance(op, ast.Gt) and not (left > right):
-                        return False
-                    elif isinstance(op, ast.GtE) and not (left >= right):
-                        return False
-                    elif isinstance(op, ast.In) and not (left in right):
-                        return False
-                    elif isinstance(op, ast.NotIn) and not (left not in right):
+                    if isinstance(op, ast.Eq) and not (left == right) or isinstance(op, ast.NotEq) and not (left != right) or isinstance(op, ast.Lt) and not (left < right) or isinstance(op, ast.LtE) and not (left <= right) or isinstance(op, ast.Gt) and not (left > right) or isinstance(op, ast.GtE) and not (left >= right) or isinstance(op, ast.In) and left not in right or isinstance(op, ast.NotIn) and not (left not in right):
                         return False
                 return True
             elif isinstance(node, ast.Name):
@@ -118,20 +104,20 @@ def evaluate_filter_expression(track: Track, expression: str) -> bool:
 
 
 def filter_tracks(
-    tracks: List[Track],
-    artist_filter: Optional[str] = None,
-    genre_filter: Optional[str] = None,
-    theme_filter: Optional[str] = None,
-    decade_filter: Optional[str] = None,
-    language_filter: Optional[str] = None,
+    tracks: list[Track],
+    artist_filter: str | None = None,
+    genre_filter: str | None = None,
+    theme_filter: str | None = None,
+    decade_filter: str | None = None,
+    language_filter: str | None = None,
     clean_only: bool = False,
     explicit_only: bool = False,
-    min_year: Optional[int] = None,
-    max_year: Optional[int] = None,
-    min_popularity: Optional[int] = None,
-    max_popularity: Optional[int] = None,
-    filter_expr: Optional[str] = None
-) -> List[Track]:
+    min_year: int | None = None,
+    max_year: int | None = None,
+    min_popularity: int | None = None,
+    max_popularity: int | None = None,
+    filter_expr: str | None = None
+) -> list[Track]:
     """Filters track collection across multiple dimensions."""
     filtered = list(tracks)
 
@@ -169,7 +155,7 @@ def filter_tracks(
         ]
 
     if language_filter:
-        targets = [l.strip().lower() for l in language_filter.split(",") if l.strip()]
+        targets = [lang.strip().lower() for lang in language_filter.split(",") if lang.strip()]
         filtered = [
             t for t in filtered
             if any(tl in t.language.lower() for tl in targets)
