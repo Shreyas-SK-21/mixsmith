@@ -34,6 +34,8 @@ class Track:
     added_at: str = ""
     added_by: str = ""
     spotify_url: str = ""
+    metadata_confidence: Dict[str, str] = field(default_factory=dict)
+    metadata_provenance: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.primary_artist and self.artists:
@@ -47,6 +49,11 @@ class Track:
     def artist_display(self) -> str:
         """Formatted string of all artists."""
         return ", ".join(self.artists) if self.artists else self.primary_artist or "Unknown"
+
+    @property
+    def all_artists(self) -> List[str]:
+        """List of all artists (primary and co-artists)."""
+        return list(self.artists)
 
     @property
     def duration_formatted(self) -> str:

@@ -76,6 +76,11 @@ class PlaylistMutationError(CurationError):
     pass
 
 
+class SnapshotDriftError(PlaylistMutationError):
+    """Raised when the target playlist's snapshot ID changed unexpectedly during mutation."""
+    pass
+
+
 # --- Exporters ---
 
 class ExportError(MixsmithError):
