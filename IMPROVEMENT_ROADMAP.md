@@ -135,13 +135,13 @@ mixsmith/
 | Phase | Milestone | Priority | Status |
 |---|---|---|---|
 | **Phase 1** | Comprehensive Audit & Improvement Roadmap | Critical | Completed |
-| **Phase 2** | Core Domain Models & Modular Decoupling | Critical | In Progress |
-| **Phase 3** | Advanced Algorithmic Engine (De-clumper, Constraints, Dedup) | High | Planned |
-| **Phase 4** | Automated Unit & Integration Testing Suite | High | Planned |
-| **Phase 5** | Exporter Modernization (Excel & CSV) | Medium | Planned |
-| **Phase 6** | Natural Language Curation Layer (Deterministic execution) | High | Planned |
-| **Phase 7** | Playlist Management (Split, Merge, Diff, Snapshots) | Medium | Planned |
-| **Phase 8** | Security, Documentation, and Open-Source Polish | High | Planned |
+| **Phase 2** | Core Domain Models & Modular Decoupling | Critical | Completed |
+| **Phase 3** | Advanced Algorithmic Engine (De-clumper, Constraints, Dedup) | High | Completed |
+| **Phase 4** | Automated Unit & Integration Testing Suite | High | Completed |
+| **Phase 5** | Exporter Modernization (Excel & CSV) | Medium | Completed |
+| **Phase 6** | Natural Language Curation Layer (Deterministic execution) | High | Completed |
+| **Phase 7** | Central Validation & Curation Explainability (V0.3 Refinement) | High | Completed |
+| **Phase 8** | Confidence-Aware Metadata & Mutation Verification (V0.4 Roadmap) | Medium | Planned |
 
 ---
 

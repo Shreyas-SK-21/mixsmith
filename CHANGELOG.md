@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-10-31
+
+### Added
+- **Central Independent Validation Engine (`core/validation.py`)**: Post-curation independent audit of every constraint (artist spacing, max tracks, duration, genre shares, pinned positions, track preservation).
+- **Curation Explainability (`core/explanation.py`)**: Structured, deterministic explanation reports (`CurationExplanation`) explaining why every track was selected, excluded, or placed at a position. Supports `--explain` and export to Markdown/JSON.
+- **Duration Knapsack Optimizer (`core/duration.py`)**: Discrete 0/1 Knapsack dynamic programming with artist-diversity penalty to replace naive greedy fitting.
+- **Hamilton-Hare Largest Remainder Method (`core/quotas.py`)**: Guaranteed exact integer quota allocation across genres and decades without off-by-one rounding errors.
+- **Enhanced Feasibility Analysis (`core/declumper.py`)**: Distinguishes necessary vs sufficient conditions, detects collaboration-constrained sets, and reports bottleneck artists and achievable ceilings.
+- **Expanded Test Suite**: 35 comprehensive automated tests covering validation, knapsack duration, explainability, quotas, and de-clumping.
+
 ## [0.2.0] - 2026-10-31
 
 ### Added
