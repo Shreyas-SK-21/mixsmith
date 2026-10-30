@@ -1,5 +1,7 @@
 """Human-centric music categorization and metadata inference."""
 
+from __future__ import annotations
+
 import re
 from typing import List, Tuple
 
