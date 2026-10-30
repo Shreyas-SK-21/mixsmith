@@ -37,7 +37,7 @@ It understands your music in human terms: genres, vibes, decades, languages, pop
 ### 2. Install
 
 ```bash
-git clone https://github.com/ShreyasSK21/mixsmith.git
+git clone https://github.com/Shreyas-SK-21/mixsmith.git
 cd mixsmith
 pip install -r requirements.txt
 ```
