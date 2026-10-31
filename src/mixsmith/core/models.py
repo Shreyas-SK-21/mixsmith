@@ -20,7 +20,7 @@ class Track:
     release_date: str = ""
     release_year: int | None = None
     duration_ms: int = 0
-    popularity: int = 0
+    popularity: int | None = None
     isrc: str = ""
     explicit: bool = False
     primary_genre: str = "Other / Unclassified"
@@ -101,7 +101,7 @@ class Track:
             "duration_formatted": self.duration_formatted,
             "Duration": self.duration_formatted,
             "popularity": self.popularity,
-            "Popularity Score": self.popularity,
+            "Popularity Score": self.popularity if self.popularity is not None else "",
             "isrc": self.isrc,
             "ISRC": self.isrc,
             "explicit": self.explicit,
@@ -129,6 +129,8 @@ class Track:
             "Added By": self.added_by,
             "spotify_url": self.spotify_url,
             "Spotify URL": self.spotify_url,
+            "metadata_confidence": dict(self.metadata_confidence),
+            "metadata_provenance": dict(self.metadata_provenance),
         }
 
     @classmethod
@@ -163,12 +165,19 @@ class Track:
         except (ValueError, TypeError):
             dur_ms = 0
 
-        # Normalize Popularity
-        pop = data.get("popularity") or data.get("Popularity Score") or data.get("Popularity") or 0
-        try:
-            pop = int(pop)
-        except (ValueError, TypeError):
-            pop = 0
+        # Normalize Popularity (distinguish None from 0)
+        raw_pop = data.get("popularity")
+        if raw_pop is None:
+            raw_pop = data.get("Popularity Score")
+        if raw_pop is None:
+            raw_pop = data.get("Popularity")
+
+        pop: int | None = None
+        if raw_pop is not None and str(raw_pop).strip() != "":
+            try:
+                pop = int(raw_pop)
+            except (ValueError, TypeError):
+                pop = None
 
         # Normalize Release Year
         rel_date = str(data.get("release_date") or data.get("Release Date") or "")
@@ -223,7 +232,9 @@ class Track:
             disc_number=int(data.get("disc_number") or data.get("Disc Number") or 1),
             added_at=data.get("added_at") or data.get("Added At") or "",
             added_by=data.get("added_by") or data.get("Added By") or "",
-            spotify_url=data.get("spotify_url") or data.get("Spotify URL") or ""
+            spotify_url=data.get("spotify_url") or data.get("Spotify URL") or "",
+            metadata_confidence=dict(data.get("metadata_confidence") or {}),
+            metadata_provenance=dict(data.get("metadata_provenance") or {})
         )
 
 

@@ -76,6 +76,16 @@ class SnapshotDriftError(PlaylistMutationError):
     """Raised when the target playlist's snapshot ID changed unexpectedly during mutation."""
 
 
+class PartialMutationError(PlaylistMutationError):
+    """Raised when a batched mutation fails mid-execution, leaving the playlist in a partially modified state."""
+    def __init__(self, message: str, playlist_id: str = "", batches_completed: int = 0, tracks_added: int = 0, details: dict | None = None):
+        super().__init__(message)
+        self.playlist_id = playlist_id
+        self.batches_completed = batches_completed
+        self.tracks_added = tracks_added
+        self.details = details or {}
+
+
 # --- Exporters ---
 
 class ExportError(MixsmithError):
