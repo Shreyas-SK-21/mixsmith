@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.3.1] - 2026-10-31
+## [0.3.2] - 2026-10-31
+
+### Added
+- **Spotify February 2026 API Migration (`connectors/spotify.py`, `core/models.py`)**:
+  - Migrated playlist parsing and pagination from legacy `playlist.tracks` to `playlist.items.items[].item` and `items.total` with backwards-compatible fallback.
+  - Implemented pagination via `/playlists/{id}/items` endpoint.
+  - Handled removal of bulk `GET /artists?ids=...` endpoint in Development Mode with graceful individual artist queries and fallback.
+  - Handled omitted track and artist `popularity` in Development Mode: modeled `Track.popularity` as `int | None = None` and ensured no algorithm treats missing popularity as 0.
+- **Energy Progression Engine (`core/journeys.py`, `core/sequencing.py`)**:
+  - Added `compute_track_energy()` and `sequence_energy_progression()` sequencing tracks along energy curves (`mellow_to_energetic`, `energetic_to_mellow`).
+  - Energy scoring is derived purely from human themes, genres, and lexical title markers without relying on popularity or deprecated Spotify audio features.
+- **Duration Bounds Validation (`core/validation.py`, `core/sequencing.py`, `ai/schema.py`)**:
+  - Added hard constraints for `min_duration_minutes` and `max_duration_minutes`.
+  - Added pre-flight library duration feasibility verification and specification conflict detection.
+  - Added hard validation audit (`validate_duration_bounds`) reporting explicit error severity on bound violations.
+- **Mutation Safety & Partial Failure Handling (`connectors/spotify.py`, `core/exceptions.py`, `cli/main.py`)**:
+  - Introduced `PartialMutationError` to capture non-atomic batch insertion failures with exact completion counts and tracks added.
+  - Added post-mutation sequence verification comparing resulting tracks against intended order.
+- **Comprehensive Spotify Developer Policy Review (`docs/spotify-policy-review.md`)**:
+  - Documented Sections III.13 & III.14 compliance boundaries, distinguishing the platform-independent curation engine from live Spotify connector calls.
+  - Documented Spotify Development Mode limitations (owner Premium requirement, 5 authorized users quota, 25 Client IDs).
+- **Test Suite Expansion**:
+  - Added 13 new unit and integration tests across `tests/test_spotify_migration.py` and `tests/test_features_v032.py`, expanding automated test coverage to 93 tests.
 
 ### Fixed
 - **De-clumper Correctness & Infeasibility Analysis (`core/declumper.py`)**:

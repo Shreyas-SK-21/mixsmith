@@ -143,6 +143,7 @@ mixsmith/
 | **Phase 7** | Central Validation & Curation Explainability (V0.3 Refinement) | High | Completed |
 | **Phase 8** | Confidence-Aware Metadata & Mutation Verification | Medium | Completed |
 | **Phase 9** | Critical Regression Fixes & Feasibility Rigor (V0.3.1) | Critical | Completed |
+| **Phase 10** | Spotify API Modernisation, Policy Boundaries & Curation Refinement (V0.3.2) | High | Completed |
 
 ---
 

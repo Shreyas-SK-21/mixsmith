@@ -59,3 +59,26 @@ Mixsmith is designed as a modular, platform-independent music curation engine. T
    3. Local `.env` file
    4. Platform configuration directory (`~/.config/mixsmith/credentials.json`)
    5. Legacy plugin fallback path for backward compatibility.
+
+---
+
+## 6. Spotify February 2026 API Integration & Mutation Safety
+
+- **Schema Migration**: Mixsmith incorporates Spotify's February 2026 API specifications:
+  - Fetches and paginates playlists using `/playlists/{id}/items` rather than legacy `/tracks` paths.
+  - Parses items using `playlist.items.items[].item` and tracks totals via `items.total` while maintaining backwards-compatible fallback for archived dumps.
+  - Filters null items and non-track podcast entities safely during ingestion.
+  - Manages removal of the bulk `GET /artists?ids=...` endpoint in Development Mode via graceful single-artist enrichment and local metadata caching.
+  - Treats missing track and artist popularity as `None` (unrated) rather than presuming a score of 0.
+- **Partial Mutation Safeguards (`PartialMutationError`)**:
+  - Catches mid-batch HTTP and rate-limit failures during track insertion.
+  - Computes exact batch completion counts, tracks added, and snapshot offsets to avoid silent sequence truncation.
+  - Verifies post-mutation track ordering against the resulting playlist.
+
+---
+
+## 7. Policy Boundaries & Decoupled Execution
+
+Mixsmith strictly segregates offline algorithmic curation from Spotify API access:
+- **Platform-Independent Core**: All de-clumping, knapsack duration optimization, Hamilton-Hare quota allocations, AST filter trees, and confidence-aware metadata inferences run completely offline without transmitting data to Spotify or third-party AI models.
+- **Spotify Integration Boundaries**: Live Spotify connectors are subject to Spotify Developer Policy Sections III.13 and III.14. See [docs/spotify-policy-review.md](spotify-policy-review.md) for detailed audit findings and operational boundaries.

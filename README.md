@@ -19,7 +19,8 @@ Mixsmith operates platform-independently: its algorithmic core is decoupled from
 - **Natural-Language Curation**: Prompt Mixsmith in plain English (e.g. *"Create a 2-hour late night drive with The Weeknd and Joji, no artist repeats within 5 tracks, moving from mellow to energetic"*).
 - **Advanced Artist De-clumping**: Prevents consecutive artist repeats with multi-artist collaboration awareness and configurable $k$-spacing windows.
 - **Pigeonhole Feasibility Analysis**: Automatically detects if requested artist spacing is mathematically possible and computes the maximum achievable threshold.
-- **Multi-Constraint Engine**: Curate against simultaneous limits (max tracks per artist, target runtime, genre distribution quotas, pinned tracks).
+- **Multi-Constraint Engine**: Curate against simultaneous limits (max tracks per artist, target runtime, hard min/max duration bounds, genre distribution quotas, pinned tracks).
+- **Energy Progression**: Sequences playlists smoothly along energy curves (`mellow_to_energetic` or `energetic_to_mellow`) derived from human themes and genres rather than popularity or deprecated audio features.
 - **Listening Journeys**:
   - **Artist Evolution**: Chronological discography progression.
   - **Decade Journey**: Smooth era transitions ($60\text{s} \to 70\text{s} \to \dots \to 2020\text{s}$).
@@ -102,6 +103,17 @@ python -m mixsmith.cli curate \
   --sort declump
 ```
 
+### Energy Progression & Duration Bounds
+
+```bash
+python -m mixsmith.cli curate \
+  --from-excel "Library.xlsx" \
+  --sort energy \
+  --min-duration 45 \
+  --max-duration 75 \
+  --output "EveningFlow.xlsx"
+```
+
 ### Intelligent Deduplication
 
 ```bash
@@ -147,16 +159,25 @@ python -m mixsmith.cli curate \
 
 ---
 
-## Spotify API & Developer Policy Compliance
+## Spotify API & Developer Policy Boundaries
 
-Mixsmith is designed in strict compliance with the **Spotify Developer Terms of Service and Policy**:
+Mixsmith maintains an intentional, architectural separation between its **platform-independent curation core** and optional **Spotify API connectors**:
 
-- **Decoupled Algorithmic Processing**: Mixsmith's categorization, sequencing, and curation algorithms run entirely locally. All genre inferences, era attributions, and thematic vibe classifications are computed via platform-independent heuristics, lexical tokenization, and ISRC registry codes—completely decoupled from Spotify streaming endpoints or proprietary recommendation models.
-- **No Unauthorized Ingestion or AI Training**: Mixsmith never transmits Spotify metadata, catalog details, or user playlists to external LLM services or third-party APIs for training, indexing, or profiling. Natural language curation queries are parsed locally into structured constraint schemas.
-- **Standard Permitted OAuth Scopes**: Mixsmith requests only standard, minimal user permissions (`playlist-modify-private`, `playlist-read-private`, `user-library-read`).
-- **Cryptographic Auth Security (RFC 7636 PKCE)**: Authorization employs SHA-256 code challenge generation and random cryptographic CSRF state validation against unauthorized interception.
-- **Safe Mutation Protocol**: Mutations are strictly opt-in. Mixsmith requires explicit interactive confirmation or the `--confirm` flag, inspects pre-mutation snapshots for external drift, validates Spotify URIs, and executes track modifications in atomic batches.
-- **No Stream Ripping or Audio Redistribution**: Mixsmith manages metadata and playlist track references only. It does not stream, cache, reverse-engineer, or store audio files.
+- **Platform-Independent Engine**: All combinatorial scheduling algorithms, multi-artist de-clumping, 0/1 knapsack duration solvers, Hamilton-Hare quota allocators, and confidence-aware metadata classifiers operate 100% offline. They can be fully utilized with local CSV and Excel collections without connecting to Spotify.
+- **February 2026 Web API Compatibility**: The Spotify connector has been migrated to Spotify's February 2026 API contract (`playlist.items.items[].item`, `items.total`, removal of bulk `/artists?ids=...`, and non-assumption of `popularity` metrics).
+- **Policy Boundaries (Sections III.13 & III.14)**:
+  - Mixsmith does **not** make blanket claims of official Spotify compliance or certification.
+  - Section III.13 restricts creating derivative statistics, listening profiles, or metrics from Spotify Content. Local curation reduces privacy risks but formal policy clearance remains pending.
+  - Section III.14 prohibits training or ingesting Spotify Content into AI/ML models. Mixsmith strictly complies by parsing only user prompt strings—never passing track content or metadata to external LLMs.
+  - Detailed legal analysis and architectural boundaries are documented in [docs/spotify-policy-review.md](docs/spotify-policy-review.md).
+- **Development Mode Realities**:
+  - Requires user-supplied Spotify Developer credentials (`SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`).
+  - App owner must hold an active **Spotify Premium** subscription.
+  - Limited to **5 explicit authorized test users** and shares global rate limits across a max of 25 Client IDs.
+- **Safe Mutation Safeguards**:
+  - Mutations are non-destructive and opt-in (`--dry-run` by default).
+  - Snapshot drift detection validates that external tracks have not changed before execution.
+  - Non-atomic batch insertion errors are caught and surfaced via `PartialMutationError`, preventing silent truncation or corrupt ordering.
 
 ---
 

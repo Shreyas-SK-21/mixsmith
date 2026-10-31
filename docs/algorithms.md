@@ -131,3 +131,30 @@ Located in `tests/benchmarks/`:
 - **Synthetic Music Generator**: Creates realistic libraries using Zipf-distributed artist frequencies ($1 / k^{1.3}$) and collaboration hypergraphs.
 - **Exact Backtracking Solver**: An exact permutation solver acting as a testing oracle for small libraries ($N \le 12$) to verify that whenever a mathematically valid schedule exists, our greedy heuristic satisfies it with zero violations.
 - **Scalability**: Sequences $N = 1,000$ tracks in under 0.6 seconds using precomputed artist sets and $O(1)$ candidate removal.
+
+---
+
+## 10. Energy Progression & Duration Bounds
+
+### Energy Progression Formulation
+Mixsmith computes an independent, platform-decoupled acoustic energy score $E(T) \in [0, 100]$ without calling deprecated streaming API audio features or relying on popularity metrics:
+
+1. **Genre Baseline**: Assigned based on intrinsic dynamic characteristics of the primary genre:
+   - Metal: $90$, Electronic / Dance: $85$, Hip-Hop / Rap: $80$, Rock: $75$, Pop: $70$
+   - Country / Americana: $55$, Desi / South Asian: $60$, Latin: $65$
+   - Jazz & Blues: $45$, Folk & Acoustic: $35$, Classical / Cinematic: $25$
+2. **Thematic Modifiers**:
+   - Workout / Gym: $+25$, Party & Club: $+20$, Late Night Drive: $-5$
+   - Chill & Coffee Shop: $-25$, Focus & Study: $-20$, Heartbreak & Melancholy: $-15$
+3. **Title Lexical Cues**:
+   - High energy tokens (`"remix"`, `"club"`, `"hard"`, `"party"`, `"fast"`): $+10$
+   - Low energy tokens (`"acoustic"`, `"slow"`, `"unplugged"`, `"piano"`, `"lo-fi"`, `"sleep"`): $-15$
+4. **Sequencing Curves**:
+   - `mellow_to_energetic`: Monotonically ascending energy sort with artist de-clumping stabilization.
+   - `energetic_to_mellow`: Monotonically descending energy sort with artist de-clumping stabilization.
+
+### Hard Duration Bounds
+Mixsmith introduces strict minimum and maximum duration boundaries $[T_{\min}, T_{\max}]$:
+- **Pre-flight Feasibility**: Verifies that candidate pools contain sufficient total runtime to satisfy $T_{\min}$.
+- **Conflict Audit**: Proactively flags specifications where `target_duration_minutes` falls outside $[T_{\min}, T_{\max}]$.
+- **Hard Validation**: Audited by `PlaylistValidator` with `severity="error"` ensuring runtime boundaries are never violated.
