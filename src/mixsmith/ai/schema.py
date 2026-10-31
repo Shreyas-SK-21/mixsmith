@@ -109,12 +109,27 @@ class CurationSpecification:
         # 4. Min duration > Max duration
         min_d = self.hard_constraints.min_duration_minutes
         max_d = self.hard_constraints.max_duration_minutes
+        target_d = self.soft_constraints.target_duration_minutes
         if min_d and max_d and min_d > max_d:
             found_conflicts.append(ConstraintConflict(
                 conflict_type="inverted_duration_bounds",
                 description=f"Minimum duration ({min_d}m) cannot exceed maximum duration ({max_d}m).",
                 conflicting_parameters=["min_duration_minutes", "max_duration_minutes"],
                 suggested_resolution=f"Set max duration >= {min_d}m."
+            ))
+        if target_d and min_d and target_d < min_d:
+            found_conflicts.append(ConstraintConflict(
+                conflict_type="target_duration_below_minimum",
+                description=f"Target duration ({target_d}m) is below minimum required duration ({min_d}m).",
+                conflicting_parameters=["target_duration_minutes", "min_duration_minutes"],
+                suggested_resolution=f"Set target duration >= {min_d}m."
+            ))
+        if target_d and max_d and target_d > max_d:
+            found_conflicts.append(ConstraintConflict(
+                conflict_type="target_duration_above_maximum",
+                description=f"Target duration ({target_d}m) exceeds maximum allowable duration ({max_d}m).",
+                conflicting_parameters=["target_duration_minutes", "max_duration_minutes"],
+                suggested_resolution=f"Set target duration <= {max_d}m."
             ))
 
         self.conflicts = found_conflicts

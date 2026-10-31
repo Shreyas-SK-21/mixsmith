@@ -141,7 +141,7 @@ def allocate_genre_quotas(
         quota = slot_targets[g_name]
         candidates = genre_candidates.get(g_name, [])
         # Sort candidates by popularity
-        sorted_cand = sorted(candidates, key=lambda item: item[1].popularity, reverse=True)
+        sorted_cand = sorted(candidates, key=lambda item: (item[1].popularity if item[1].popularity is not None else 50), reverse=True)
 
         count = 0
         for orig_idx, t in sorted_cand:
@@ -164,7 +164,7 @@ def allocate_genre_quotas(
                 if orig_idx not in selected_indices:
                     surplus_candidates.append((orig_idx, t, g_name))
 
-        surplus_candidates.sort(key=lambda item: item[1].popularity, reverse=True)
+        surplus_candidates.sort(key=lambda item: (item[1].popularity if item[1].popularity is not None else 50), reverse=True)
 
         reallocated_count = 0
         for orig_idx, t, g_name in surplus_candidates:

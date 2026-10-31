@@ -103,7 +103,7 @@ def find_duplicates(tracks: list[Track]) -> list[DuplicateGroup]:
             def rank_track(item: Track) -> tuple[int, int]:
                 variant = classify_track_variant(item)
                 scores = {"standard": 5, "remaster": 4, "deluxe": 3, "radio_edit": 2, "acoustic": 1, "live": 0}
-                return (scores.get(variant, 0), item.popularity)
+                return (scores.get(variant, 0), item.popularity if item.popularity is not None else 50)
 
             sorted_cluster = sorted(cluster, key=rank_track, reverse=True)
             canonical = sorted_cluster[0]

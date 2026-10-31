@@ -134,6 +134,45 @@ def detect_era_and_decade(release_date: str) -> tuple[str, str, int]:
         return "Modern 2020s", "2020s", year
 
 
+def infer_era_and_decade(
+    release_date: str,
+    user_override_era: str | None = None,
+    user_override_decade: str | None = None,
+) -> tuple[MetadataInferenceResult, MetadataInferenceResult, int]:
+    """Infers Era and Decade with confidence and provenance tracking."""
+    if not release_date:
+        return (
+            MetadataInferenceResult("Unknown Era", MetadataConfidence.UNKNOWN, MetadataProvenance.DEFAULT_FALLBACK, "No release date provided."),
+            MetadataInferenceResult("Unknown", MetadataConfidence.UNKNOWN, MetadataProvenance.DEFAULT_FALLBACK, "No release date provided."),
+            0
+        )
+
+    match = re.match(r"^(\d{4})", str(release_date).strip())
+    if not match:
+        return (
+            MetadataInferenceResult("Unknown Era", MetadataConfidence.UNKNOWN, MetadataProvenance.DEFAULT_FALLBACK, f"Malformed release date: {release_date}"),
+            MetadataInferenceResult("Unknown", MetadataConfidence.UNKNOWN, MetadataProvenance.DEFAULT_FALLBACK, f"Malformed release date: {release_date}"),
+            0
+        )
+
+    year = int(match.group(1))
+    era_name, decade_name, _ = detect_era_and_decade(release_date)
+
+    era_result = MetadataInferenceResult(
+        value=user_override_era or era_name,
+        confidence=MetadataConfidence.KNOWN if user_override_era else MetadataConfidence.HIGH,
+        provenance=MetadataProvenance.USER_OVERRIDE if user_override_era else MetadataProvenance.VERIFIED_API,
+        rationale=f"Determined from release year {year}."
+    )
+    decade_result = MetadataInferenceResult(
+        value=user_override_decade or decade_name,
+        confidence=MetadataConfidence.KNOWN if user_override_decade else MetadataConfidence.HIGH,
+        provenance=MetadataProvenance.USER_OVERRIDE if user_override_decade else MetadataProvenance.VERIFIED_API,
+        rationale=f"Determined from release year {year}."
+    )
+    return era_result, decade_result, year
+
+
 def infer_language_and_region(
     isrc: str,
     genres: list[str],
@@ -272,8 +311,8 @@ def infer_theme(
     genres: list[str],
     primary_genre: str,
     release_year: int,
-    popularity: int,
-    duration_ms: int,
+    popularity: int | None = None,
+    duration_ms: int = 0,
     user_override: str | None = None
 ) -> MetadataInferenceResult:
     """Classifies track into human themes with confidence tracking."""
@@ -391,7 +430,7 @@ def infer_theme(
     )
 
 
-def detect_theme(title: str, genres: list[str], primary_genre: str, release_year: int, popularity: int, duration_ms: int) -> str:
+def detect_theme(title: str, genres: list[str], primary_genre: str, release_year: int, popularity: int | None = None, duration_ms: int = 0) -> str:
     """Backward-compatible helper returning theme string."""
     return infer_theme(title, genres, primary_genre, release_year, popularity, duration_ms).value
 

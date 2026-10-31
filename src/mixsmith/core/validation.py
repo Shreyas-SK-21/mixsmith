@@ -182,6 +182,46 @@ class PlaylistValidator:
         )
 
     @staticmethod
+    def validate_duration_bounds(
+        tracks: list[Track],
+        min_duration_minutes: int | None = None,
+        max_duration_minutes: int | None = None
+    ) -> ConstraintResult:
+        """
+        Hard Constraint: Verifies that total playlist duration falls strictly within [min_duration, max_duration].
+        """
+        if min_duration_minutes is None and max_duration_minutes is None:
+            return ConstraintResult(
+                name="duration_bounds",
+                satisfied=True,
+                details="No min/max duration bounds requested.",
+                severity="info"
+            )
+
+        total_ms = sum(t.duration_ms for t in tracks)
+        min_ms = (min_duration_minutes * 60000) if min_duration_minutes is not None else 0
+        max_ms = (max_duration_minutes * 60000) if max_duration_minutes is not None else float("inf")
+
+        satisfied = (min_ms <= total_ms <= max_ms)
+        min_str = f"{min_duration_minutes}m" if min_duration_minutes is not None else "0m"
+        max_str = f"{max_duration_minutes}m" if max_duration_minutes is not None else "unlimited"
+        actual_min = total_ms / 60000.0
+
+        if satisfied:
+            details = f"Duration ({actual_min:.1f}m) satisfies required bounds [{min_str}, {max_str}]."
+            severity = "info"
+        else:
+            details = f"Duration bounds violation: achieved {actual_min:.1f}m, outside required bounds [{min_str}, {max_str}]."
+            severity = "error"  # Hard constraint
+
+        return ConstraintResult(
+            name="duration_bounds",
+            satisfied=satisfied,
+            details=details,
+            severity=severity
+        )
+
+    @staticmethod
     def validate_genre_distribution(
         tracks: list[Track],
         target_quotas: dict[str, float] | None,
@@ -369,6 +409,8 @@ class PlaylistValidator:
         max_tracks_per_artist: int | None = None,
         target_duration_minutes: int | None = None,
         duration_tolerance_minutes: int = 10,
+        min_duration_minutes: int | None = None,
+        max_duration_minutes: int | None = None,
         genre_distribution: dict[str, float] | None = None,
         decade_distribution: dict[str, float] | None = None,
         pinned_positions: dict[int, str] | None = None,
@@ -383,6 +425,7 @@ class PlaylistValidator:
             cls.validate_track_preservation(original_tracks, final_tracks),
             cls.validate_artist_spacing(final_tracks, min_artist_spacing, consider_all_artists=consider_all_artists),
             cls.validate_max_tracks_per_artist(final_tracks, max_tracks_per_artist, consider_all_artists=consider_all_artists),
+            cls.validate_duration_bounds(final_tracks, min_duration_minutes, max_duration_minutes),
             cls.validate_target_duration(final_tracks, target_duration_minutes, duration_tolerance_minutes),
             cls.validate_genre_distribution(final_tracks, genre_distribution),
             cls.validate_decade_distribution(final_tracks, decade_distribution),

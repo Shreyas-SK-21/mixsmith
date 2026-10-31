@@ -122,7 +122,7 @@ def _knapsack_dp_duration(
     """
     # Scaled discrete weights (at least 1)
     weights = [max(1, math.ceil(t.duration_ms / unit_ms)) for t in tracks]
-    values = [max(10, t.popularity) for t in tracks]
+    values = [max(10, t.popularity if t.popularity is not None else 50) for t in tracks]
 
     # dp[w] = (max_val, list_of_indices, actual_total_ms)
     dp: dict[int, tuple[float, list[int], int]] = {0: (0.0, [], 0)}
@@ -176,7 +176,7 @@ def _knapsack_dp_duration(
     # Guard against any edge-case discretisation overshoot
     while selected_tracks and actual_total_ms > max_acceptable_ms:
         # Drop the track with least value/popularity to respect ceiling
-        worst_track = min(selected_tracks, key=lambda t: t.popularity)
+        worst_track = min(selected_tracks, key=lambda t: t.popularity if t.popularity is not None else 50)
         selected_tracks.remove(worst_track)
         actual_total_ms = sum(t.duration_ms for t in selected_tracks)
 
@@ -187,7 +187,7 @@ def _knapsack_dp_duration(
     within_tol = abs(delta_ms) <= tol_ms and actual_total_ms <= max_acceptable_ms
 
     sel_reasons = {
-        t.id: f"Selected by 0/1 Knapsack optimizer (duration {t.duration_formatted}, popularity {t.popularity})"
+        t.id: f"Selected by 0/1 Knapsack optimizer (duration {t.duration_formatted}, popularity {t.popularity if t.popularity is not None else 'N/A'})"
         for t in selected_tracks
     }
     ex_reasons = {
@@ -228,7 +228,8 @@ def _diversity_aware_large_duration(
     for t in tracks:
         a = (t.primary_artist or "Unknown").lower()
         # Diversity score: rewards moderate popularity and penalizes artist saturation
-        div_score = (t.popularity + 20) / math.sqrt(artist_freq[a])
+        pop_val = t.popularity if t.popularity is not None else 50
+        div_score = (pop_val + 20) / math.sqrt(artist_freq[a])
         scored_candidates.append((div_score, t))
 
     scored_candidates.sort(key=lambda x: x[0], reverse=True)

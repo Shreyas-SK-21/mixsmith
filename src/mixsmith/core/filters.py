@@ -172,9 +172,9 @@ def filter_tracks(
         filtered = [t for t in filtered if t.release_year and t.release_year <= max_year]
 
     if min_popularity is not None:
-        filtered = [t for t in filtered if t.popularity >= min_popularity]
+        filtered = [t for t in filtered if t.popularity is not None and t.popularity >= min_popularity]
     if max_popularity is not None:
-        filtered = [t for t in filtered if t.popularity <= max_popularity]
+        filtered = [t for t in filtered if t.popularity is not None and t.popularity <= max_popularity]
 
     if filter_expr:
         filtered = [t for t in filtered if evaluate_filter_expression(t, filter_expr)]

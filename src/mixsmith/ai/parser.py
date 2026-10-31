@@ -296,11 +296,18 @@ def execute_natural_language_curation(
             filtered = quota_res.selected_tracks
 
     # 3. Deterministic Constraint Sequencing
+    pop_bias = "hits" if prefs.popularity_preference == "hits" else ("gems" if prefs.popularity_preference == "hidden_gems" else None)
     constraints = CurationConstraints(
         min_artist_spacing=hard.min_artist_spacing,
         max_tracks_per_artist=hard.max_tracks_per_artist,
         target_duration_minutes=soft.target_duration_minutes,
+        min_duration_minutes=hard.min_duration_minutes,
+        max_duration_minutes=hard.max_duration_minutes,
+        genre_distribution=soft.desired_genres,
+        decade_distribution=soft.desired_decades,
         sort_mode=prefs.sort_journey or "declump",
+        energy_progression=prefs.tempo_energy_preference,
+        popularity_bias=pop_bias
     )
 
     engine = ConstraintSequencingEngine()

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mixsmith"
-version = "0.3.1"
+version = "0.3.2"
 description = "A music playlist curator. Describe what you want, get the playlist."
 readme = "README.md"
 license = "MIT"

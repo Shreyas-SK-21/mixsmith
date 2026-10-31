@@ -81,7 +81,7 @@ def export_tracks_to_excel(
 
     for row_idx, t in enumerate(tracks, 2):
         row_fill = zebra_fill if row_idx % 2 == 0 else None
-        pop_tier = "Superstar Hit" if t.popularity >= 75 else ("Mainstream Popular" if t.popularity >= 50 else ("Moderate" if t.popularity >= 25 else "Hidden Gem"))
+        pop_tier = "Unrated" if t.popularity is None else ("Superstar Hit" if t.popularity >= 75 else ("Mainstream Popular" if t.popularity >= 50 else ("Moderate" if t.popularity >= 25 else "Hidden Gem")))
         length_cat = "Quick Track (<2:30)" if t.duration_ms < 150000 else ("Standard (2:30-5:00)" if t.duration_ms <= 300000 else "Extended / Epic (>5:00)")
 
         row_data = [

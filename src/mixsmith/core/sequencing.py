@@ -7,10 +7,13 @@ from dataclasses import dataclass
 
 from mixsmith.core.declumper import PlacementDecision, declump_tracks
 from mixsmith.core.duration import optimize_playlist_duration
+from mixsmith.core.exceptions import InfeasibleConstraintError
 from mixsmith.core.explanation import CurationExplanation, TrackCurationDecision
 from mixsmith.core.journeys import (
+    compute_track_energy,
     sequence_artist_evolution,
     sequence_decade_journey,
+    sequence_energy_progression,
     sequence_genre_journey,
     sequence_nostalgia_mode,
 )
@@ -29,11 +32,14 @@ class CurationConstraints:
     max_tracks_per_artist: int | None = None
     target_duration_minutes: int | None = None
     duration_tolerance_minutes: int = 10
+    min_duration_minutes: int | None = None
+    max_duration_minutes: int | None = None
     genre_distribution: dict[str, float] | None = None
     decade_distribution: dict[str, float] | None = None
     pinned_positions: dict[int, str] | None = None  # index -> track_id / uri
     popularity_bias: str | None = None  # "hits", "gems", "balanced"
     sort_mode: str | None = None  # "declump", "chronological", "decade", "genre", "nostalgia"
+    energy_progression: str | None = None  # "mellow_to_energetic", "energetic_to_mellow"
     preserve_order: bool = False
 
 
@@ -50,6 +56,21 @@ class ConstraintSequencingEngine:
         constraints = constraints or CurationConstraints()
         initial_count = len(tracks)
         current = list(tracks)
+
+        # Pre-flight duration bounds check
+        if constraints.min_duration_minutes is not None and constraints.max_duration_minutes is not None:
+            if constraints.min_duration_minutes > constraints.max_duration_minutes:
+                raise InfeasibleConstraintError(
+                    f"min_duration_minutes ({constraints.min_duration_minutes}) cannot exceed max_duration_minutes ({constraints.max_duration_minutes})",
+                    constraint="duration_bounds"
+                )
+        if constraints.min_duration_minutes is not None:
+            total_avail_ms = sum(t.duration_ms for t in tracks)
+            if total_avail_ms < constraints.min_duration_minutes * 60000:
+                raise InfeasibleConstraintError(
+                    f"Available track pool total duration ({total_avail_ms / 60000:.1f}m) is less than required minimum ({constraints.min_duration_minutes}m)",
+                    constraint="min_duration"
+                )
 
         # Decision tracking dictionary for explainability: track_id -> TrackCurationDecision
         decisions: dict[str, TrackCurationDecision] = {
@@ -75,12 +96,13 @@ class ConstraintSequencingEngine:
             pruned: list[Track] = []
             for a_key, a_tracks in artist_buckets.items():
                 if len(a_tracks) > limit:
-                    # Keep tracks with highest popularity
-                    sorted_a = sorted(a_tracks, key=lambda t: t.popularity, reverse=True)
+                    # Keep tracks with highest popularity (handling None popularity gracefully)
+                    sorted_a = sorted(a_tracks, key=lambda t: (t.popularity if t.popularity is not None else 50), reverse=True)
                     retained = sorted_a[:limit]
                     pruned.extend(retained)
                     for t in retained:
-                        decisions[t.id].selection_reasons.append(f"Retained within {t.primary_artist} max {limit} quota (popularity {t.popularity})")
+                        pop_desc = f"popularity {t.popularity}" if t.popularity is not None else "unrated"
+                        decisions[t.id].selection_reasons.append(f"Retained within {t.primary_artist} max {limit} quota ({pop_desc})")
                         decisions[t.id].constraints_applied.append("max_tracks_per_artist")
                     for t in sorted_a[limit:]:
                         decisions[t.id].selected = False
@@ -131,7 +153,13 @@ class ConstraintSequencingEngine:
                         decisions[t.id].constraints_applied.append("target_duration")
 
         # 4. Sorting & Journey Sequencing
-        if constraints.sort_mode:
+        if constraints.energy_progression:
+            current = sequence_energy_progression(current, direction=constraints.energy_progression)
+            for t in current:
+                en_score, _, _ = compute_track_energy(t)
+                decisions[t.id].placement_reason = f"Ordered along {constraints.energy_progression} curve (energy score: {en_score:.1f})"
+                decisions[t.id].constraints_applied.append(f"energy_progression:{constraints.energy_progression}")
+        elif constraints.sort_mode:
             sm = constraints.sort_mode.lower().strip()
             if sm in ("chronological", "time-travel", "oldest-first"):
                 current = sequence_artist_evolution(current, reverse=False)
@@ -144,18 +172,18 @@ class ConstraintSequencingEngine:
             elif sm in ("nostalgia", "nostalgia-mode"):
                 current = sequence_nostalgia_mode(current)
             elif sm in ("popularity", "hits", "hits-first"):
-                current.sort(key=lambda t: t.popularity, reverse=True)
+                current.sort(key=lambda t: (t.popularity is not None, t.popularity or 0), reverse=True)
             elif sm in ("gems", "gems-first", "underground"):
-                current.sort(key=lambda t: t.popularity)
+                current.sort(key=lambda t: (t.popularity is not None, -(t.popularity or 0)), reverse=True)
 
             for t in current:
                 decisions[t.id].constraints_applied.append(f"sort_mode:{sm}")
 
-        # 5. Popularity bias
+        # 5. Popularity bias (safe for None popularity)
         if constraints.popularity_bias == "hits":
-            current.sort(key=lambda t: t.popularity, reverse=True)
+            current.sort(key=lambda t: (t.popularity is not None, t.popularity or 0), reverse=True)
         elif constraints.popularity_bias == "gems":
-            current.sort(key=lambda t: t.popularity)
+            current.sort(key=lambda t: (t.popularity is not None, -(t.popularity or 0)), reverse=True)
 
         # 6. Artist spacing (De-clumper)
         placement_records: list[PlacementDecision] = []
@@ -204,7 +232,10 @@ class ConstraintSequencingEngine:
             max_tracks_per_artist=constraints.max_tracks_per_artist,
             target_duration_minutes=constraints.target_duration_minutes,
             duration_tolerance_minutes=constraints.duration_tolerance_minutes,
+            min_duration_minutes=constraints.min_duration_minutes,
+            max_duration_minutes=constraints.max_duration_minutes,
             genre_distribution=constraints.genre_distribution,
+            decade_distribution=constraints.decade_distribution,
             pinned_positions=constraints.pinned_positions
         )
 

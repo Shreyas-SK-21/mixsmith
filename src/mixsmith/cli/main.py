@@ -20,6 +20,7 @@ from mixsmith.ai.parser import execute_natural_language_curation
 from mixsmith.auth.manager import OAuthManager
 from mixsmith.connectors.spotify import SpotifyConnector
 from mixsmith.core.dedup import deduplicate_tracks, find_duplicates
+from mixsmith.core.exceptions import PartialMutationError
 from mixsmith.core.filters import filter_tracks
 from mixsmith.core.manager import (
     compare_playlists,
@@ -261,14 +262,24 @@ def handle_curate(args):
 
     # Execute playlist creation on Spotify
     conn = SpotifyConnector()
-    created = conn.create_playlist(
-        name=args.name or plan.playlist_name,
-        description=f"Curated by Mixsmith ({plan.final_track_count} tracks)",
-        public=args.public,
-        tracks=plan.tracks
-    )
-    print("\n[SUCCESS] Playlist created on Spotify!")
-    print(f"URL: {created.url}")
+    try:
+        created = conn.create_playlist(
+            name=args.name or plan.playlist_name,
+            description=f"Curated by Mixsmith ({plan.final_track_count} tracks)",
+            public=args.public,
+            tracks=plan.tracks
+        )
+        print("\n[SUCCESS] Playlist created on Spotify!")
+        print(f"URL: {created.url}")
+        print(f"Verified Tracks Added: {created.total_tracks}/{len(plan.tracks)}")
+    except PartialMutationError as pme:
+        print(f"\n[PARTIAL FAILURE] {pme}")
+        print(f"Playlist created (ID: {pme.playlist_id}) with {pme.tracks_added} tracks added.")
+        if pme.details.get("playlist_url"):
+            print(f"URL: {pme.details['playlist_url']}")
+        print("Note: Spotify Web API batch requests are sequential and non-atomic.")
+    except Exception as e:
+        print(f"\n[ERROR] Failed to create playlist on Spotify: {e}")
 
 
 def handle_dedup(args):
